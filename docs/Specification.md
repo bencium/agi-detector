@@ -1,5 +1,13 @@
 # Specification
 
+use my github: https://github.com/bencium
+
+see keys in .env file
+
+github user name: ben@bencium.co.uk
+
+
+
 ## Objective
 i want to build an app, that might be able to detect the signs of AGI. This is my plan, ideas, inspiration below, assess the plan, suggest solutions and tell me the technical development for nextjs react step by step. Follow the sparc method: Specification, Pseudocode, Architecture, Refinement, and Completion.
 

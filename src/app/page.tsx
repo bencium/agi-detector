@@ -1,101 +1,307 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import React, { useState, useEffect } from 'react';
+
+interface CrawlResult {
+  id: string;
+  title: string;
+  url: string;
+  content: string;
+  metadata: {
+    source: string;
+    timestamp: string;
+  };
+}
+
+interface AnalysisResult {
+  id: string;
+  score: number;
+  confidence: number;
+  indicators: string[];
+  explanation: string;
+}
+
+const MONITORED_SOURCES = [
+  { id: 'openai', name: 'OpenAI Blog' },
+  { id: 'deepmind', name: 'DeepMind Research' },
+  { id: 'anthropic', name: 'Anthropic Updates' },
+  { id: 'microsoft', name: 'Microsoft AI News' },
+  { id: 'ibm', name: 'IBM Research Blog' },
+];
+
+const MONITORED_INDICATORS = [
+  { id: 'perf-leaps', text: 'Unexplained AI performance leaps' },
+  { id: 'self-improve', text: 'Self-improvement capabilities' },
+  { id: 'cross-domain', text: 'Cross-domain knowledge transfer' },
+  { id: 'autonomous', text: 'Autonomous behavior patterns' },
+];
+
+const KEY_SOURCES = [
+  { id: 'openai', text: 'OpenAI Blog' },
+  { id: 'deepmind', text: 'DeepMind Research' },
+  { id: 'anthropic', text: 'Anthropic Updates' },
+  { id: 'microsoft', text: 'Microsoft AI Research' },
+];
+
+// Add a function to check if it's time for the daily crawl
+const shouldRunDailyCrawl = (lastRunTime: string | null): boolean => {
+  if (!lastRunTime) return true;
+  
+  const lastRun = new Date(lastRunTime);
+  const now = new Date();
+  
+  // Check if it's been 24 hours since the last run
+  return now.getTime() - lastRun.getTime() >= 24 * 60 * 60 * 1000;
+};
+
+export default function Home(): React.ReactElement {
+  const [crawlResults, setCrawlResults] = useState<CrawlResult[]>([]);
+  const [analyses, setAnalyses] = useState<AnalysisResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isAutoCrawling, setIsAutoCrawling] = useState(false);
+  const [lastCrawlTime, setLastCrawlTime] = useState<string | null>(null);
+  const [nextScheduledCrawl, setNextScheduledCrawl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Function to format dates
+  const formatDateTime = (date: Date) => {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true
+    }).format(date);
+  };
+
+  const analyzeData = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/analyze', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setAnalyses(prev => [...prev, data.data]);
+      }
+    } catch (error) {
+      console.error('Analysis failed:', error);
+      setError(error instanceof Error ? error.message : 'Analysis failed');
+    }
+    setIsLoading(false);
+  };
+
+  const startCrawling = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/crawl', { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.success) {
+        setCrawlResults(prev => [...prev, ...data.data]);
+        const now = new Date();
+        setLastCrawlTime(now.toISOString());
+        
+        // Schedule next crawl
+        const nextCrawl = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        setNextScheduledCrawl(nextCrawl.toISOString());
+
+        // Automatically analyze new results
+        await analyzeData();
+      } else {
+        throw new Error(data.error || 'Failed to crawl sources');
+      }
+    } catch (error) {
+      console.error('Crawling failed:', error);
+      setError(error instanceof Error ? error.message : 'Failed to crawl sources');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Auto-crawling check interval (checks every hour)
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    if (isAutoCrawling) {
+      // Initial check and crawl if needed
+      if (shouldRunDailyCrawl(lastCrawlTime)) {
+        startCrawling();
+      } else if (lastCrawlTime) {
+        // Set next scheduled crawl time
+        const lastCrawl = new Date(lastCrawlTime);
+        const nextCrawl = new Date(lastCrawl.getTime() + 24 * 60 * 60 * 1000);
+        setNextScheduledCrawl(nextCrawl.toISOString());
+      }
+      
+      // Check every hour if it's time to crawl
+      intervalId = setInterval(() => {
+        if (shouldRunDailyCrawl(lastCrawlTime)) {
+          startCrawling();
+        }
+      }, 60 * 60 * 1000); // Check every hour
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAutoCrawling, lastCrawlTime]);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <main className="container mx-auto px-4 py-8">
+        <div className="p-8">
+          <h1 className="text-4xl font-bold mb-6 text-black">AGI Detection Dashboard</h1>
+          
+          <div className="bg-white/5 rounded-lg p-6 mb-8">
+            <h2 className="text-2xl font-semibold mb-4 text-black">About AGI Detector</h2>
+            <p className="text-black mb-4">
+              An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) by analyzing patterns across multiple domains. Our system continuously monitors research breakthroughs, technological advancements, and anomalous patterns that might indicate the emergence of AGI.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-6">
+              <div>
+                <h3 className="font-semibold mb-1">Monitored Indicators:</h3>
+                <ul className="list-disc list-inside">
+                  {MONITORED_INDICATORS.map(indicator => (
+                    <li key={indicator.id} className="text-black">
+                      {indicator.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h3 className="font-semibold mb-1">Key Sources:</h3>
+                <ul className="list-disc list-inside">
+                  {KEY_SOURCES.map(source => (
+                    <li key={source.id} className="text-black">
+                      {source.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+              <div key="feature-1" className="bg-white/10 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2 text-black">🔍 Comprehensive Monitoring</h3>
+                <p className="text-sm text-black">Tracks AI research papers, news sites, company blogs, and social media for breakthrough indicators</p>
+              </div>
+              <div key="feature-2" className="bg-white/10 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2 text-black">🧠 Advanced Analysis</h3>
+                <p className="text-sm text-black">Uses NLP to analyze content for signs of AI self-improvement, cross-domain learning, and autonomous behavior</p>
+              </div>
+              <div key="feature-3" className="bg-white/10 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2 text-black">⚡ Real-time Alerts</h3>
+                <p className="text-sm text-black">Instant notifications for significant developments or anomalous patterns in AI advancement</p>
+              </div>
+            </div>
+          </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Stats Overview */}
+            <div key="stat-1" className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-lg font-semibold text-black mb-2">Sources Monitored</h3>
+              <p className="text-3xl font-bold text-blue-600">{crawlResults.length}</p>
+            </div>
+            <div key="stat-2" className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-lg font-semibold text-black mb-2">Potential Indicators</h3>
+              <p className="text-3xl font-bold text-yellow-600">{analyses.length}</p>
+            </div>
+            <div key="stat-3" className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-lg font-semibold text-black mb-2">AGI Likelihood Assessment</h3>
+              <p className="text-3xl font-bold text-green-600">
+                {analyses.length > 0 ? 'Medium' : 'Low'}
+              </p>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Recent Findings */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-xl font-bold text-black mb-4">Recent Findings</h2>
+              <div className="space-y-4">
+                {crawlResults.length === 0 ? (
+                  <p className="text-black">No recent findings to display.</p>
+                ) : (
+                  crawlResults.map((result) => (
+                    <div key={result.id} className="border-b border-gray-200 pb-4">
+                      <h3 className="font-semibold text-black">{result.title}</h3>
+                      <p className="text-sm text-black">{result.url}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Monitored Sources */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-xl font-bold text-black mb-4">Monitored Sources</h2>
+              <ul className="space-y-2">
+                {MONITORED_SOURCES.map(source => (
+                  <li key={source.id} className="text-black">
+                    {source.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="mt-8 space-y-4">
+            <div className="flex gap-4">
+              <button
+                onClick={() => setIsAutoCrawling(!isAutoCrawling)}
+                className={`px-6 py-2 rounded-lg font-semibold ${
+                  isAutoCrawling 
+                    ? 'bg-red-600 hover:bg-red-700 text-white' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isAutoCrawling ? 'Stop Auto-Crawling' : 'Start Auto-Crawling'}
+              </button>
+              <button
+                onClick={startCrawling}
+                disabled={isLoading || isAutoCrawling}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold disabled:opacity-50"
+              >
+                {isLoading ? 'Processing...' : 'Manual Crawl'}
+              </button>
+              <button
+                onClick={analyzeData}
+                disabled={isLoading || crawlResults.length === 0}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-semibold disabled:opacity-50"
+              >
+                Analyze Data
+              </button>
+            </div>
+            
+            {/* Status Information */}
+            <div className="text-sm space-y-1">
+              {lastCrawlTime && (
+                <p className="text-black">Last crawl: {formatDateTime(new Date(lastCrawlTime))}</p>
+              )}
+              {isAutoCrawling && nextScheduledCrawl && (
+                <p className="text-green-600">
+                  Next scheduled crawl: {formatDateTime(new Date(nextScheduledCrawl))}
+                </p>
+              )}
+              {error && (
+                <p className="text-red-600">{error}</p>
+              )}
+            </div>
+          </div>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
