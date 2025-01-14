@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AGI Detector ��
 
-## Getting Started
+[![Build Status](https://img.shields.io/badge/build-in%20progress-yellow)](https://github.com/bencium/agi-detector)
+[![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-First, run the development server:
+Building something wild: an AGI Detector that could spot the first signs of artificial general intelligence emerging. Developed using the SPARC framework via [sparc CLI](https://github.com/ruvnet/sparc/tree/cli-dev) by Reuven Cohen.
 
+## 🎯 Project Vision
+
+A real-time monitoring system to detect early signs of emerging artificial general intelligence through various indicators and patterns across the AI landscape.
+
+## 🚀 Key Features
+
+- **Real-time Monitoring**: Track AI breakthroughs across major research labs
+- **Performance Analysis**: Auto-detection of unexplained AI performance jumps
+- **Software Surveillance**: Track unattributed software releases that seem too advanced
+- **Social Pattern Analysis**: Monitor social media patterns for signs of AGI influence
+- **Alert System**: Multi-indicator warning system for potential AGI emergence
+
+## 🏗️ Project Status
+
+Currently in early development phase. Not live yet.
+
+### Tech Stack
+- Next.js 14 + React
+- TypeScript
+- Prisma ORM
+- TailwindCSS
+- Web Crawling Infrastructure
+- LLM Integration
+
+## 📚 Documentation
+
+- [Specification](docs/Specification.md)
+- [Architecture](docs/Architecture.md)
+- [Pseudocode](docs/Pseudocode.md)
+- [Refinement](docs/Refinement.md)
+- [Completion](docs/Completion.md)
+
+## 🛠️ Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/bencium/agi-detector.git
+cd agi-detector
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables:
+```bash
+cp .env.example .env.local
+```
+Edit `.env.local` with your API keys and configuration.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Set up the database:
+```bash
+npx prisma generate
+npx prisma db push
+```
 
-## Learn More
+5. Run the development server:
+```bash
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000) to view the application.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🧪 Testing
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Run the test suite:
+```bash
+npm test
+```
 
-## Deploy on Vercel
+## 🤝 Contributing
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👤 Author
+
+**Bence Csernak**
+- Website: [bencium.io](https://bencium.io)
+- GitHub: [@bencium](https://github.com/bencium)
+
+## 🙏 Acknowledgments
+
+- [Reuven Cohen](https://github.com/ruvnet) for the SPARC framework
+- All contributors and supporters of this project
+
+---
+
+**Note**: This project is in active development. Features and documentation will be updated regularly.
