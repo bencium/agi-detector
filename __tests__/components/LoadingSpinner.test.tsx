@@ -1,6 +1,6 @@
-const React = require('react');
-const { render } = require('@testing-library/react');
-const LoadingSpinner = require('@/app/components/shared/LoadingSpinner').default;
+import React from 'react';
+import { render } from '@testing-library/react';
+import LoadingSpinner from '@/app/components/shared/LoadingSpinner';
 
 describe('LoadingSpinner Component', () => {
   it('renders without crashing', () => {

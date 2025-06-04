@@ -1,12 +1,11 @@
-const React = require('react');
+import React from 'react';
 
-const LoadingSpinner = () => {
+const LoadingSpinner: React.FC = () => {
   return (
     <div className="flex items-center justify-center">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
     </div>
-  )
-}
+  );
+};
 
-module.exports = LoadingSpinner;
-module.exports.default = LoadingSpinner;
+export default LoadingSpinner;
