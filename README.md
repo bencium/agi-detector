@@ -129,26 +129,28 @@ npx playwright install chromium
 ```
 
 3. **Set up environment variables**:
-Create a `.env.local` file with:
+Create a `.env.local` file with exactly these variables:
 ```env
-# PostgreSQL Database
-# For Neon: Copy from Neon dashboard (looks like: postgresql://user:pass@host.neon.tech/neondb?sslmode=require)
-# For Supabase: Copy from Settings > Database
-# For Local: postgresql://localhost/agi_detector
-DATABASE_URL="your_postgresql_connection_string_here"
+# PostgreSQL Database (e.g., Neon, Supabase)
+DATABASE_URL="postgresql://user:password@host/database?sslmode=require"
 
-# OpenAI API Key (starts with sk-...)
-# Get from: https://platform.openai.com/api-keys
-API_KEY="sk-..."
+# OpenAI API Key
+API_KEY=sk-...
 
-# Firecrawl API Key (starts with fc-...)
-# Get from: https://app.firecrawl.dev/api-keys
-# Optional but enables DeepMind and Anthropic crawling
-FIRECRAWL_API_KEY="fc-..."
+# Firecrawl API Key (optional - for DeepMind and Anthropic)
+# Get your API key from https://www.firecrawl.dev/
+# Sign up for free tier at https://www.firecrawl.dev/pricing
+FIRECRAWL_API_KEY=fc-...
 
 # Optional: Proxy for web crawling
-# PROXY_URL="http://your-proxy:port"
+PROXY_URL="http://your-proxy:port"
 ```
+
+**Important Notes about .env.local**:
+- Replace `DATABASE_URL` with your actual PostgreSQL connection string
+- Replace `API_KEY` with your OpenAI API key (no quotes needed)
+- Replace `FIRECRAWL_API_KEY` with your Firecrawl key (no quotes needed)
+- The format must be exactly as shown (no extra quotes around keys)
 
 4. **Set up the database**:
 ```bash
