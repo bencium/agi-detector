@@ -11,17 +11,23 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@mendable/firecrawl-js": "^1.21.1",
     "@prisma/client": "^6.2.1",
     "@types/cheerio": "^0.22.35",
     "@types/jsonwebtoken": "^9.0.7",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
+    "dotenv": "^16.5.0",
     "jsonwebtoken": "^9.0.2",
+    "limiter": "^3.0.0",
     "next": "15.1.4",
     "openai": "^4.78.1",
+    "playwright": "^1.52.0",
     "prisma": "^6.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "user-agents": "^1.1.561",
+    "xml2js": "^0.6.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {

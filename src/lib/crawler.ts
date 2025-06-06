@@ -1,6 +1,7 @@
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import { RateLimiter } from './openai';
+import { crawlWithAdvancedMethods, cleanupBrowser } from './advanced-crawler';
 
 interface CrawledArticle {
   title: string;
@@ -71,14 +72,15 @@ export const SOURCES = {
     {
       name: 'arXiv AI',
       url: 'https://arxiv.org/list/cs.AI/recent',
-      selector: '.meta',
+      selector: 'dd',
       titleSelector: '.list-title',
       contentSelector: '.list-authors, .list-comments, .list-subjects',
-      linkSelector: '.list-identifier > a:first-child',
+      linkSelector: 'dt a:first-child',
+      isSpecial: true, // Special handling for arXiv structure
       transform: {
         title: (text: string) => text.replace(/^Title:\s+/, '').trim(),
         content: (text: string) => text.replace(/\n+/g, ' ').trim(),
-        url: (url: string) => `https://arxiv.org${url}`,
+        url: (url: string) => url.startsWith('http') ? url : `https://arxiv.org${url}`,
       }
     },
   ],
@@ -102,6 +104,7 @@ type Source = {
   titleSelector: string;
   contentSelector: string;
   linkSelector: string;
+  isSpecial?: boolean;
   transform?: {
     title?: (text: string) => string;
     content?: (text: string) => string;
@@ -158,38 +161,79 @@ export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
     const elements = $(source.selector);
     console.log(`[Crawler] Found ${elements.length} matching elements`);
 
-    elements.each((_, element) => {
-      const $element = $(element);
-      let title = $element.find(source.titleSelector).text().trim();
-      let content = $element.find(source.contentSelector).text().trim();
-      let url = $element.find(source.linkSelector).attr('href') || '';
-      const id = $element.find('.list-identifier').text().trim();
+    // Special handling for arXiv
+    if (source.isSpecial && source.name === 'arXiv AI') {
+      // Get dt elements for links
+      const dtElements = $('dt');
+      
+      elements.each((index, element) => {
+        const $element = $(element);
+        let title = $element.find(source.titleSelector).text().trim();
+        let content = $element.find(source.contentSelector).text().trim();
+        
+        // Get corresponding dt element for the link
+        const $dt = dtElements.eq(index);
+        let url = $dt.find('a[title="Abstract"]').attr('href') || $dt.find('a').first().attr('href') || '';
+        const id = $dt.find('.list-identifier a').first().text().trim() || $dt.text().replace('[', '').replace(']', '').trim();
 
-      // Apply transformations if they exist
-      if (source.transform) {
-        if (source.transform.title) title = source.transform.title(title);
-        if (source.transform.content) content = source.transform.content(content);
-        if (source.transform.url) url = source.transform.url(url);
-      }
+        // Apply transformations if they exist
+        if (source.transform) {
+          if (source.transform.title) title = source.transform.title(title);
+          if (source.transform.content) content = source.transform.content(content);
+          if (source.transform.url) url = source.transform.url(url);
+        }
 
-      console.log(`[Crawler] Processing element - Title: ${title ? title.substring(0, 50) + '...' : 'none'}`);
-      console.log(`[Crawler] Content length: ${content?.length || 0} characters`);
+        console.log(`[Crawler] Processing element - Title: ${title ? title.substring(0, 50) + '...' : 'none'}`);
+        console.log(`[Crawler] URL: ${url}`);
 
-      if (title && content) {
-        articles.push({
-          title,
-          content,
-          url,
-          metadata: {
-            source: source.name,
-            timestamp: new Date().toISOString(),
-            id: id
-          },
-        });
-      } else {
-        console.log(`[Crawler] Skipping element - missing title or content`);
-      }
-    });
+        if (title && content) {
+          articles.push({
+            title,
+            content,
+            url,
+            metadata: {
+              source: source.name,
+              timestamp: new Date().toISOString(),
+              id: id
+            },
+          });
+        }
+      });
+    } else {
+      // Regular handling for other sources
+      elements.each((_, element) => {
+        const $element = $(element);
+        let title = $element.find(source.titleSelector).text().trim();
+        let content = $element.find(source.contentSelector).text().trim();
+        let url = $element.find(source.linkSelector).attr('href') || '';
+        const id = $element.find('.list-identifier').text().trim();
+
+        // Apply transformations if they exist
+        if (source.transform) {
+          if (source.transform.title) title = source.transform.title(title);
+          if (source.transform.content) content = source.transform.content(content);
+          if (source.transform.url) url = source.transform.url(url);
+        }
+
+        console.log(`[Crawler] Processing element - Title: ${title ? title.substring(0, 50) + '...' : 'none'}`);
+        console.log(`[Crawler] Content length: ${content?.length || 0} characters`);
+
+        if (title && content) {
+          articles.push({
+            title,
+            content,
+            url,
+            metadata: {
+              source: source.name,
+              timestamp: new Date().toISOString(),
+              id: id
+            },
+          });
+        } else {
+          console.log(`[Crawler] Skipping element - missing title or content`);
+        }
+      });
+    }
 
     console.log(`[Crawler] Successfully found ${articles.length} articles from ${source.name}`);
     return articles;
@@ -209,24 +253,44 @@ export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
 }
 
 export async function crawlAllSources(): Promise<CrawledArticle[]> {
-  const allSources = [
+  // Now crawl all sources with advanced methods
+  const sourcesToCrawl = [
     ...SOURCES.RESEARCH_BLOGS,
     ...SOURCES.NEWS_SITES,
     ...SOURCES.ACADEMIC
   ];
 
+  console.log(`[Crawler] Starting crawl of ${sourcesToCrawl.length} sources...`);
+  console.log(`[Crawler] Sources: ${sourcesToCrawl.map(s => s.name).join(', ')}`);
+
   const results = await Promise.allSettled(
-    allSources.map(source => crawlSource(source))
+    sourcesToCrawl.map(async (source) => {
+      // Try advanced crawler first for non-academic sources
+      if (source.name !== 'arXiv AI') {
+        const advancedResults = await crawlWithAdvancedMethods(source);
+        if (advancedResults.length > 0) {
+          return advancedResults;
+        }
+      }
+      // Fall back to original crawler
+      return crawlSource(source);
+    })
   );
 
-  return results
+  const articles = results
     .filter((result): result is PromiseFulfilledResult<CrawledArticle[]> => 
       result.status === 'fulfilled'
     )
     .flatMap(result => result.value)
     .filter(article => 
       article.title && 
-      article.content && 
-      article.content.length > 100
+      article.content !== undefined && 
+      article.content !== null
     );
+
+  // Cleanup browser if used
+  await cleanupBrowser();
+
+  console.log(`[Crawler] Total articles found: ${articles.length}`);
+  return articles;
 } 

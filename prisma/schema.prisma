@@ -27,14 +27,48 @@ model CrawlResult {
 }
 
 model AnalysisResult {
-  id         String   @id @default(uuid())
-  crawlId    String   @unique
-  score      Float
-  indicators String[]
-  confidence Float
-  timestamp  DateTime @default(now())
+  id                String   @id @default(uuid())
+  crawlId           String   @unique
+  score             Float
+  indicators        String[]
+  confidence        Float
+  timestamp         DateTime @default(now())
+  severity          String?  // none, low, medium, high, critical
+  evidenceQuality   String?  // speculative, circumstantial, direct
+  requiresVerification Boolean @default(false)
+  crossReferences   String[]
+  explanation       String   @db.Text
 
   crawl CrawlResult @relation(fields: [crawlId], references: [id])
+  historicalData HistoricalData[]
 
   @@index([score])
+  @@index([timestamp])
+  @@index([severity])
+}
+
+model HistoricalData {
+  id              String   @id @default(uuid())
+  analysisId      String
+  metric          String   // e.g., "score", "confidence", "indicator_count"
+  value           Float
+  timestamp       DateTime @default(now())
+  
+  analysis AnalysisResult @relation(fields: [analysisId], references: [id])
+  
+  @@index([metric, timestamp])
+  @@index([analysisId])
+}
+
+model TrendAnalysis {
+  id              String   @id @default(uuid())
+  period          String   // daily, weekly, monthly
+  avgScore        Float
+  maxScore        Float
+  minScore        Float
+  totalAnalyses   Int
+  criticalAlerts  Int
+  timestamp       DateTime @default(now())
+  
+  @@index([period, timestamp])
 }
