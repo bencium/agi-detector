@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/bencium/agi-detector log --all --full-history -- .env)",
+      "Bash(npm audit:*)",
+      "Bash(python3:*)",
+      "Bash(npm update:*)",
+      "Bash(npm run build:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

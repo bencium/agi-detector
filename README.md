@@ -198,9 +198,31 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
    - OpenAI errors: Ensure your API key has credits
 
 ### 🔒 Security Notes
-- Never commit `.env.local` to version control
-- Keep your API keys secure
-- For production, use environment variables from your hosting platform
+
+**CRITICAL: Protect Your API Keys**
+- ⚠️ **NEVER** commit `.env` or `.env.local` files to version control
+- ⚠️ Keep your OpenAI, database, and other API keys secure and private
+- ⚠️ For production deployments, use environment variables from your hosting platform
+
+**Security Features (October 2025 Update):**
+- ✅ SSRF protection - blocks localhost, private IPs, and cloud metadata endpoints
+- ✅ Safe JSON parsing - prevents crashes from malformed responses
+- ✅ Input validation - all API parameters validated with Zod schemas
+- ✅ Request limits - 1MB body size, 10MB response size, 30s timeouts
+- ✅ Security headers - X-Frame-Options, XSS protection, content-type sniffing protection
+- ✅ Browser security - Playwright runs without dangerous --disable-web-security flags
+- ✅ SQL injection protection - Prisma ORM with parameterized queries
+- ✅ Regular dependency updates - automated security patch management
+
+**Best Practices for Users:**
+1. **API Keys**: Use separate keys for development/production, rotate regularly
+2. **Network**: Only crawl trusted public sources (default configuration is safe)
+3. **Updates**: Run `npm update` and `npm audit fix` regularly for security patches
+4. **Monitoring**: Watch for unusual API usage or costs
+5. **Local Only**: This tool is for local use; don't expose APIs publicly without authentication
+
+**For Security Issues:**
+See [SECURITY.md](SECURITY.md) for our security policy and how to report vulnerabilities responsibly.
 
 ### 🗄️ Database (Prisma) Notes
 - If `DATABASE_URL` is not set, the server runs in a no-DB mode. API routes like `/api/data` and `/api/trends` return empty arrays so you can exercise the UI and crawling/analysis flows without persistence.
@@ -362,10 +384,13 @@ The advanced crawler requires:
 - `user-agents`: User agent rotation
 - `xml2js`: RSS feed parsing
 
-### Data Accuracy
+### Data Accuracy & Privacy
 - This is an experimental system for research purposes
 - Should not be relied upon as the sole indicator of AGI emergence
 - Designed to supplement, not replace, expert analysis
+- Article content is sent to OpenAI for analysis - review OpenAI's data policy
+- URLs are accessed via Firecrawl and Brave Search APIs when configured
+- All data stays in your local database; no telemetry or external reporting
 
 ## 🚀 Deployment
 

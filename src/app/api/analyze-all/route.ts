@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { openai, AGI_DETECTION_PROMPT } from '@/lib/openai';
 import { computeSeverity } from '@/lib/severity';
+import { parseOpenAIResponse } from '@/lib/utils/safeJson';
 
 // Debug logging
 console.log('[Analyze All] Module loaded, OpenAI client:', !!openai);
@@ -56,7 +57,8 @@ async function analyzeArticle(crawlResult: any, logs: string[] = []) {
       throw new Error('No analysis result received from OpenAI');
     }
 
-    const analysisResult = JSON.parse(content);
+    // Safe JSON parsing with fallback
+    const analysisResult = parseOpenAIResponse(content);
 
     // Store analysis results
     const severity = computeSeverity(analysisResult.score || 0, analysisResult.severity);

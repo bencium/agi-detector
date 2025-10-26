@@ -6,6 +6,7 @@ import { parseStringPromise } from 'xml2js';
 import { RateLimiter as Limiter } from 'limiter';
 import { crawlWithFirecrawl } from './firecrawl-crawler';
 import { braveWebSearch } from './brave-search';
+import { isUrlSafe } from './security/urlValidator';
 
 interface CrawledArticle {
   title: string;
@@ -56,13 +57,22 @@ const getHeaders = () => ({
 // RSS feed parser
 async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArticle[]> {
   try {
+    // Security: Validate URL before fetching
+    const validation = isUrlSafe(url);
+    if (!validation.safe) {
+      console.warn(`[RSS] Blocked unsafe URL: ${url} - ${validation.reason}`);
+      return [];
+    }
+
     console.log(`[RSS] Attempting to fetch RSS feed from ${url}`);
-    const response = await axios.get(url, { 
-      headers: { 
+    const response = await axios.get(url, {
+      headers: {
         'User-Agent': getRandomUserAgent(),
-        'Accept': 'application/rss+xml, application/xml, text/xml' 
+        'Accept': 'application/rss+xml, application/xml, text/xml'
       },
-      timeout: 10000 
+      timeout: 30000,  // Increased timeout for reliability
+      maxContentLength: 10 * 1024 * 1024,  // 10MB max response size
+      maxRedirects: 3  // Limit redirects
     });
     
     const parsed = await parseStringPromise(response.data);
@@ -92,17 +102,17 @@ async function getBrowser(): Promise<Browser> {
     browser = await chromium.launch({
       headless: true,
       args: [
+        // Stealth features
         '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins',
-        '--disable-site-isolation-trials',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
+        // SECURITY: Removed dangerous flags:
+        // - '--disable-web-security' (allows cross-origin access)
+        // - '--disable-site-isolation-trials' (removes security boundaries)
+        // - '--no-sandbox' (removes sandboxing protection)
+        // - '--disable-setuid-sandbox' (unsafe)
+        // Performance optimizations only:
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-zygote',
-        '--single-process',
         '--disable-gpu'
       ]
     });
@@ -111,9 +121,16 @@ async function getBrowser(): Promise<Browser> {
 }
 
 async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArticle[]> {
+  // Security: Validate URL before crawling
+  const validation = isUrlSafe(url);
+  if (!validation.safe) {
+    console.warn(`[Browser] Blocked unsafe URL: ${url} - ${validation.reason}`);
+    return [];
+  }
+
   const browser = await getBrowser();
   const page = await browser.newPage();
-  
+
   try {
     // Stealth settings
     await page.setViewportSize({ 

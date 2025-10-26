@@ -15,7 +15,7 @@ export async function POST() {
     // Find analyses that do not have any HistoricalData rows yet
     // Simpler approach: backfill for all analyses (idempotent enough if we de-dupe per analysis)
     while (true) {
-      const analyses = await prisma.analysisResult.findMany({
+      const analyses: any[] = await prisma.analysisResult.findMany({
         orderBy: { timestamp: 'desc' },
         take: batchSize,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),

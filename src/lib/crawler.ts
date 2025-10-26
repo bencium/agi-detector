@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { RateLimiter } from './openai';
 import { crawlWithAdvancedMethods, cleanupBrowser } from './advanced-crawler';
+import { isUrlSafe } from './security/urlValidator';
 
 interface CrawledArticle {
   title: string;
@@ -139,16 +140,24 @@ const getHeaders = () => ({
 export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
   try {
     console.log(`[Crawler] Starting to crawl ${source.name} at ${source.url}`);
-    
+
+    // Security: Validate URL before crawling
+    const validation = isUrlSafe(source.url);
+    if (!validation.safe) {
+      console.warn(`[Crawler] Blocked unsafe URL for ${source.name}: ${source.url} - ${validation.reason}`);
+      return [];
+    }
+
     // Add random delay before request
     await delay(getRandomDelay());
-    
-    const response = await rateLimiter.add(() => 
+
+    const response = await rateLimiter.add(() =>
       axios.get(source.url, {
         ...proxyConfig,
         headers: getHeaders(),
-        timeout: 10000,
-        maxRedirects: 5,
+        timeout: 30000,  // Increased timeout
+        maxRedirects: 3,  // Reduced redirects
+        maxContentLength: 10 * 1024 * 1024,  // 10MB max
         validateStatus: (status) => status < 400,
       })
     );

@@ -16,7 +16,7 @@ export async function POST() {
     const rank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
 
     while (true) {
-      const rows = await prisma.analysisResult.findMany({
+      const rows: any[] = await prisma.analysisResult.findMany({
         orderBy: { id: 'asc' },
         take: batchSize,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),

@@ -1,12 +1,36 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
+
+// Input validation schema
+const trendsQuerySchema = z.object({
+  period: z.enum(['daily', 'weekly', 'monthly']).default('daily'),
+  limit: z.coerce.number().int().min(1).max(100).default(30)
+});
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get('period') || 'daily';
-    const limit = parseInt(searchParams.get('limit') || '30');
+
+    // Validate and parse query parameters
+    const validatedQuery = trendsQuerySchema.safeParse({
+      period: searchParams.get('period'),
+      limit: searchParams.get('limit')
+    });
+
+    if (!validatedQuery.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Invalid query parameters',
+          details: validatedQuery.error.errors
+        },
+        { status: 400 }
+      );
+    }
+
+    const { period, limit } = validatedQuery.data;
 
     // Prefer live aggregation from HistoricalData (Neon) for accuracy
     let trends: Array<{ timestamp: Date; avgScore: number; maxScore: number; criticalAlerts: number }>= [];

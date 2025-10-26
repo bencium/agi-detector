@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { openai, AGI_DETECTION_PROMPT } from '@/lib/openai';
 import { computeSeverity } from '@/lib/severity';
+import { parseOpenAIResponse } from '@/lib/utils/safeJson';
 
 async function updateTrendAnalysis() {
   const now = new Date();
@@ -85,21 +86,22 @@ export async function POST() {
       throw new Error('No analysis result received from OpenAI');
     }
 
-    const analysisResult = JSON.parse(content);
+    // Safe JSON parsing with fallback
+    const analysisResult = parseOpenAIResponse(content);
     const severity = computeSeverity(analysisResult.score || 0, analysisResult.severity);
 
     // Store enhanced analysis results
     const analysis = await prisma.analysisResult.create({
       data: {
         crawlId: latestCrawl.id,
-        score: analysisResult.score,
-        confidence: analysisResult.confidence,
-        indicators: analysisResult.indicators,
+        score: analysisResult.score || 0,
+        confidence: analysisResult.confidence || 0,
+        indicators: analysisResult.indicators || [],
         severity,
         evidenceQuality: analysisResult.evidence_quality || 'speculative',
         requiresVerification: analysisResult.requires_verification || false,
         crossReferences: analysisResult.cross_references || [],
-        explanation: analysisResult.explanation
+        explanation: analysisResult.explanation || 'No analysis available'
       }
     });
 
@@ -109,17 +111,17 @@ export async function POST() {
         {
           analysisId: analysis.id,
           metric: 'score',
-          value: analysisResult.score
+          value: analysisResult.score || 0
         },
         {
           analysisId: analysis.id,
           metric: 'confidence',
-          value: analysisResult.confidence
+          value: analysisResult.confidence || 0
         },
         {
           analysisId: analysis.id,
           metric: 'indicator_count',
-          value: analysisResult.indicators.length
+          value: (analysisResult.indicators || []).length
         }
       ]
     });

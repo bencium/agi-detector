@@ -3,6 +3,13 @@ import { prisma } from '@/lib/prisma';
 import { openai } from '@/lib/openai';
 import { crawlSource, SOURCES } from '@/lib/crawler';
 import { computeSeverity } from '@/lib/severity';
+import { safeJsonParse } from '@/lib/utils/safeJson';
+import { z } from 'zod';
+
+// Input validation schema
+const validateRequestSchema = z.object({
+  analysisId: z.string().uuid('Invalid analysis ID format')
+});
 
 const VALIDATION_PROMPT = `You are a second-opinion AI safety expert validating a previous AGI detection analysis. Your role is to ensure NO AGI progress is missed or downplayed.
 
@@ -30,14 +37,23 @@ Provide your validation as JSON:
 
 export async function POST(request: Request) {
   try {
-    const { analysisId } = await request.json();
+    const body = await request.json();
 
-    if (!analysisId) {
+    // Validate request body
+    const validatedBody = validateRequestSchema.safeParse(body);
+
+    if (!validatedBody.success) {
       return NextResponse.json(
-        { success: false, error: 'Analysis ID required' },
+        {
+          success: false,
+          error: 'Invalid request body',
+          details: validatedBody.error.errors
+        },
         { status: 400 }
       );
     }
+
+    const { analysisId } = validatedBody.data;
 
     // Get the analysis to validate
     const analysis = await prisma.analysisResult.findUnique({
@@ -71,7 +87,14 @@ export async function POST(request: Request) {
     };
     const validation = await openai.chat.completions.create(vOptions);
 
-    const validationResult = JSON.parse(validation.choices[0]?.message?.content || '{}');
+    // Safe JSON parsing with default fallback
+    const validationResult = safeJsonParse(validation.choices[0]?.message?.content || '{}', {
+      agrees: false,
+      validatedScore: 0,
+      reasoning: 'Failed to parse validation response',
+      additionalIndicators: [],
+      recommendation: 'investigate'
+    });
 
     // If high severity and requires verification, check cross-references
     let crossReferenceResults = [];

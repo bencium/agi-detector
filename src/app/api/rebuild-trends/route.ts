@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma, isDbEnabled } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 
 type Period = 'daily' | 'weekly' | 'monthly';
+
+// Input validation schema
+const rebuildQuerySchema = z.object({
+  period: z.enum(['daily', 'weekly', 'monthly']).optional()
+});
 
 async function snapshot(period: Period) {
   const windowDays = period === 'monthly' ? 30 : period === 'weekly' ? 7 : 1;
@@ -35,7 +41,24 @@ export async function POST(request: Request) {
   }
   try {
     const { searchParams } = new URL(request.url);
-    const p = (searchParams.get('period') as Period) || 'daily';
+
+    // Validate query parameters
+    const validatedQuery = rebuildQuerySchema.safeParse({
+      period: searchParams.get('period')
+    });
+
+    if (!validatedQuery.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Invalid query parameters',
+          details: validatedQuery.error.errors
+        },
+        { status: 400 }
+      );
+    }
+
+    const p = (validatedQuery.data.period as Period) || 'daily';
     if (p === 'daily') {
       await snapshot('daily');
     } else if (p === 'weekly') {

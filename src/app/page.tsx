@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import TrendChart from '@/components/TrendChart';
 import ConsoleOutput from '@/components/ConsoleOutput';
 import { useConsoleCapture } from '@/hooks/useConsoleCapture';
+import { safeJsonParse } from '@/lib/utils/safeJson';
 
 interface CrawlResult {
   id: string;
@@ -127,13 +128,11 @@ export default function Home(): React.ReactElement {
           break;
         }
         
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (parseError) {
-          console.error('Failed to parse response:', text);
-          throw new Error('Invalid response from server');
-        }
+        // Safe JSON parsing with fallback
+        const data = safeJsonParse(text, {
+          success: false,
+          error: 'Failed to parse server response'
+        });
         
         if (data.success && data.data?.summary) {
           const batchAnalyzed = data.data.summary.totalAnalyzed || 0;
