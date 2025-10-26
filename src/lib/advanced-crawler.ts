@@ -208,6 +208,11 @@ const API_ENDPOINTS: Record<string, string[]> = {
     'https://venturebeat.com/feed/',
     'https://feeds.feedburner.com/venturebeat/ai'
   ]
+  ,
+  'arXiv AI': [
+    'http://export.arxiv.org/rss/cs.AI',
+    'https://export.arxiv.org/rss/cs.AI'
+  ]
 };
 
 // Multi-strategy crawler

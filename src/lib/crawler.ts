@@ -265,12 +265,10 @@ export async function crawlAllSources(): Promise<CrawledArticle[]> {
 
   const results = await Promise.allSettled(
     sourcesToCrawl.map(async (source) => {
-      // Try advanced crawler first for non-academic sources
-      if (source.name !== 'arXiv AI') {
-        const advancedResults = await crawlWithAdvancedMethods(source);
-        if (advancedResults.length > 0) {
-          return advancedResults;
-        }
+      // Always try advanced methods (RSS/Brave/Fetch/Browser) first
+      const advancedResults = await crawlWithAdvancedMethods(source);
+      if (advancedResults.length > 0) {
+        return advancedResults;
       }
       // Fall back to original crawler
       return crawlSource(source);
