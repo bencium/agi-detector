@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { openai, AGI_DETECTION_PROMPT } from '@/lib/openai';
+import { computeSeverity } from '@/lib/severity';
 
 async function updateTrendAnalysis() {
   const now = new Date();
@@ -66,15 +67,18 @@ export async function POST() {
       );
     }
 
-    // Analyze content using OpenAI
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
+    // Analyze content using OpenAI (default gpt-5-mini)
+    const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+
+    const options: any = {
+      model,
       messages: [
         { role: "system", content: AGI_DETECTION_PROMPT },
         { role: "user", content: `Title: ${latestCrawl.title}\n\nContent: ${latestCrawl.content}` }
       ],
       response_format: { type: "json_object" }
-    });
+    };
+    const completion = await openai.chat.completions.create(options);
 
     const content = completion.choices[0]?.message?.content;
     if (!content) {
@@ -82,6 +86,7 @@ export async function POST() {
     }
 
     const analysisResult = JSON.parse(content);
+    const severity = computeSeverity(analysisResult.score || 0, analysisResult.severity);
 
     // Store enhanced analysis results
     const analysis = await prisma.analysisResult.create({
@@ -90,7 +95,7 @@ export async function POST() {
         score: analysisResult.score,
         confidence: analysisResult.confidence,
         indicators: analysisResult.indicators,
-        severity: analysisResult.severity || 'none',
+        severity,
         evidenceQuality: analysisResult.evidence_quality || 'speculative',
         requiresVerification: analysisResult.requires_verification || false,
         crossReferences: analysisResult.cross_references || [],

@@ -11,6 +11,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model CrawlResult {
@@ -38,6 +39,8 @@ model AnalysisResult {
   requiresVerification Boolean @default(false)
   crossReferences   String[]
   explanation       String   @db.Text
+  validatedAt       DateTime?
+  lastValidation    Json?
 
   crawl CrawlResult @relation(fields: [crawlId], references: [id])
   historicalData HistoricalData[]

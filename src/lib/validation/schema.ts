@@ -11,3 +11,4 @@ export const authSchema = z.object({
 
 export type CrawlRequest = z.infer<typeof crawlRequestSchema>
 export type AuthRequest = z.infer<typeof authSchema>
+

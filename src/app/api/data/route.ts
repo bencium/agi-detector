@@ -22,10 +22,15 @@ export async function GET() {
       }
     });
 
-    // Get all analyses
+    // Get all analyses (include crawl for source URL/title)
     const analyses = await prisma.analysisResult.findMany({
       orderBy: { timestamp: 'desc' },
-      take: 1000 // Limit to prevent memory issues
+      take: 1000, // Limit to prevent memory issues
+      include: {
+        crawl: {
+          select: { url: true, title: true }
+        }
+      }
     });
 
     // Get latest crawl time

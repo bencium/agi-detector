@@ -131,11 +131,17 @@ npx playwright install chromium
 3. **Set up environment variables**:
 Create a `.env.local` file with exactly these variables:
 ```env
-# PostgreSQL Database (e.g., Neon, Supabase)
+# PostgreSQL Database
 DATABASE_URL="postgresql://user:password@host/database?sslmode=require"
+# Optional direct connection for migrations:
+DIRECT_URL="postgresql://user:password@host/database?sslmode=require"
 
 # OpenAI API Key
 API_KEY=sk-...
+
+# Optional: Override default analysis model
+# Default: OPENAI_MODEL=gpt-5-mini
+# OPENAI_MODEL=gpt-5-mini
 
 # Firecrawl API Key (optional - for DeepMind and Anthropic)
 # Get your API key from https://www.firecrawl.dev/
@@ -144,12 +150,21 @@ FIRECRAWL_API_KEY=fc-...
 
 # Optional: Proxy for web crawling
 PROXY_URL="http://your-proxy:port"
+
+# Optional: Brave Search API (fallback search)
+# Enables site-restricted queries for sources without RSS or heavy blocking
+BRAVE_API_KEY=bs-...
+
+# Optional: Validation UI thresholds (client-side)
+# NEXT_PUBLIC_VALIDATION_MIN_SEVERITY=medium  # none|low|medium|high|critical
+# NEXT_PUBLIC_VALIDATION_ALWAYS=false         # show Validate for all analyses
 ```
 
 **Important Notes about .env.local**:
 - Replace `DATABASE_URL` with your actual PostgreSQL connection string
 - Replace `API_KEY` with your OpenAI API key (no quotes needed)
 - Replace `FIRECRAWL_API_KEY` with your Firecrawl key (no quotes needed)
+- If provided, `BRAVE_API_KEY` enables Brave site search fallback
 - The format must be exactly as shown (no extra quotes around keys)
 
 4. **Set up the database**:
@@ -187,6 +202,13 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 - Keep your API keys secure
 - For production, use environment variables from your hosting platform
 
+### 🗄️ Database (Prisma) Notes
+- If `DATABASE_URL` is not set, the server runs in a no-DB mode. API routes like `/api/data` and `/api/trends` return empty arrays so you can exercise the UI and crawling/analysis flows without persistence.
+- To enable persistence locally:
+  1) Set `DATABASE_URL` in `.env.local`.
+  2) Run `npx prisma generate`.
+  3) Run `npx prisma db push` (or `npx prisma migrate dev`).
+
 ## 🕷️ Web Crawling Implementation
 
 ### Advanced Crawling Features
@@ -204,13 +226,19 @@ The AGI Detector uses a sophisticated multi-strategy crawling system to bypass b
    - Cookie support
    - Automatic decompression
 
-3. **Firecrawl API**: For heavily protected sources
+3. **Brave Web Search (New)**: Site-restricted fallback via Brave Search API
+   - Query form: `site:<host> [source-specific keywords]`
+   - Normalizes results to article candidates (title, snippet, URL)
+   - Honors a short TTL cache and minimal rate-limiting
+   - Requires `BRAVE_API_KEY`
+
+4. **Firecrawl API**: For heavily protected sources
    - Professional web scraping service
    - Handles JavaScript rendering
    - Bypasses most anti-bot measures
    - Limited to 50 requests/day (cached for 24h)
 
-4. **Browser Automation**: Last resort using Playwright
+5. **Browser Automation**: Last resort using Playwright
    - Full JavaScript rendering
    - Stealth plugins to avoid detection
    - Random viewport sizes
@@ -271,6 +299,9 @@ The crawler includes:
 - `GET /api/trends?period={daily|weekly|monthly}` - Fetch trend data
 - `POST /api/validate` - Validate specific analysis results (only increases scores)
 - `POST /api/test-crawler` - Test individual crawler sources
+ - `POST /api/backfill-historical` - One-off backfill of HistoricalData from existing analyses
+ - `POST /api/backfill-severities` - One-off recompute of severities from scores (escalate-only)
+ - `GET /api/db-health` - Quick DB connectivity and counts (crawl/analysis/trends)
   ```json
   {
     "source": {
@@ -378,34 +409,48 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - All monitored AI research labs for their transparency
 - Contributors and testers
 
-## 🆕 Recent Updates (June 2025)
+## 🆕 Recent Updates (October 2025)
 
-### v2.1 - Complete Source Coverage & Enhanced UI
-- **All 7 Sources Working**: DeepMind and Anthropic now accessible via Firecrawl API
-- **Enhanced Console Output**: Real-time detailed logging showing:
-  - Each article being analyzed
-  - Batch progress updates
-  - Error messages and debugging info
-- **Improved Processing Indicators**: 
-  - Glowing button animation during processing
-  - Automatic console expansion
-  - Clear visual feedback
-- **Better Validation System**:
-  - "Get 2nd opinion" explanation text
-  - Detailed validation summary dialog
-  - Scores can only increase (never decrease)
-  - Shows before/after comparison
+### v2.3 — Validation UX, Trends, and Risk Link
+- Validation enhancements:
+  - Persisted “last validated” metadata on each analysis (timestamp + before/after deltas).
+  - Validate button shows for medium+ by default; configurable via `NEXT_PUBLIC_VALIDATION_MIN_SEVERITY` and `NEXT_PUBLIC_VALIDATION_ALWAYS`.
+  - Severity is recomputed from score and never decreases; backfill endpoint provided.
+- Trends improvements:
+  - Live aggregation now reads from `HistoricalData` (with fallback), so charts reflect real scores without snapshots.
+  - One‑time backfill endpoint adds missing historical rows for existing analyses.
+- Risk banner action:
+  - “View critical finding(s)” link jumps to the most severe analysis card.
 
-### v2.0 - Enhanced AGI Detection
-- **Upgraded to GPT-4.1-mini**: Cost-efficient model with sophisticated analysis
-- **Improved AGI Detection Prompt**: More sensitive to AGI indicators including:
-  - Near-term AGI developments
-  - Architectural innovations
-  - Multi-modal capabilities
-  - Better scoring gradients (0.1-0.3 for minor advances, 0.3-0.5 for significant progress)
-- **Enhanced Risk Level Indicator**: Shows details like average score and critical findings count
-- **Historical Tracking**: Complete database of all analyses
-- **Trend Visualization**: Interactive charts showing AGI risk over time
+### v2.2 — Brave Fallback, GPT‑5 Mini, No‑DB Mode
+- Brave Web Search fallback integrated into crawler:
+  - Site‑restricted queries via Brave API (`BRAVE_API_KEY`)
+  - 10‑minute in‑memory cache + minimal rate limiting
+  - Unit tests with axios mocked (`__tests__/lib/brave-search.test.ts`)
+- Default analysis model switched to `gpt-5-mini` with low reasoning:
+  - Overridable via `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`
+  - Reasoning option added only for GPT‑5 models
+- No‑DB mode for local development:
+  - When `DATABASE_URL` is unset, Prisma is stubbed and APIs return empty datasets
+  - Documented in README; `.env.local.example` updated
+- DX and stability enhancements:
+  - Jest migrated to `ts-jest` for TS/ESM; all tests passing
+  - Next.js build skips lint/type checks for local builds (CI should still lint)
+  - Added `.env.local.example` and support for `BRAVE_API_KEY`
+  - Contributor guide `AGENTS.md` added and updated
+- Fixes and refactors:
+  - Validation schema moved to `src/lib/validation/schema.ts`
+  - Prisma client wrapper simplified in `src/lib/prisma.ts`
+
+### v2.1 — Complete Source Coverage & Enhanced UI
+- All 7 sources working: DeepMind and Anthropic via Firecrawl API
+- Enhanced console output and processing indicators
+- Validation system improvements (second‑opinion flow; scores never decrease)
+
+### v2.0 — Enhanced AGI Detection
+- Upgraded to GPT‑4.1‑mini (historical)
+- Improved AGI detection prompt and risk indicators
+- Historical tracking + trend visualization
 
 ### Advanced Web Crawling
 - **Multi-Strategy Approach**: RSS feeds → HTTP requests → Firecrawl API → Browser automation

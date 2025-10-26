@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { openai } from '@/lib/openai';
 import { crawlSource, SOURCES } from '@/lib/crawler';
+import { computeSeverity } from '@/lib/severity';
 
 const VALIDATION_PROMPT = `You are a second-opinion AI safety expert validating a previous AGI detection analysis. Your role is to ensure NO AGI progress is missed or downplayed.
 
@@ -53,20 +54,22 @@ export async function POST(request: Request) {
       );
     }
 
-    // Cross-validate with GPT-4.1
+    // Cross-validate with OpenAI (default gpt-5-mini with low reasoning)
     const validationPrompt = VALIDATION_PROMPT
       .replace('{score}', analysis.score.toString())
       .replace('{indicators}', analysis.indicators.join(', '))
       .replace('{severity}', analysis.severity || 'none');
 
-    const validation = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+    const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+    const vOptions: any = {
+      model,
       messages: [
         { role: "system", content: validationPrompt },
         { role: "user", content: `Title: ${analysis.crawl.title}\n\nContent: ${analysis.crawl.content}` }
       ],
       response_format: { type: "json_object" }
-    });
+    };
+    const validation = await openai.chat.completions.create(vOptions);
 
     const validationResult = JSON.parse(validation.choices[0]?.message?.content || '{}');
 
@@ -81,14 +84,31 @@ export async function POST(request: Request) {
     const newScore = validationResult.validatedScore || analysis.score;
     const finalScore = Math.max(analysis.score, newScore); // Always keep the higher score
     
+    const prevConfidence = analysis.confidence;
+    const addedIndicators = (validationResult.additionalIndicators || []).length;
+    const newConfidence = Math.min(1, prevConfidence + (validationResult.agrees ? 0.2 : 0.1));
+    const lastValidation = {
+      prevScore: analysis.score,
+      newScore: finalScore,
+      prevConfidence,
+      newConfidence,
+      addedIndicators,
+      recommendation: validationResult.recommendation || 'investigate',
+      timestamp: new Date().toISOString(),
+    };
+
+    const newSeverity = computeSeverity(finalScore, (analysis.severity as any) || 'none');
     const updatedAnalysis = await prisma.analysisResult.update({
       where: { id: analysisId },
       data: {
         requiresVerification: false,
-        confidence: Math.min(1, analysis.confidence + (validationResult.agrees ? 0.2 : 0.1)), // Always increase confidence
+        confidence: newConfidence, // Always increase confidence
         score: finalScore,
+        severity: newSeverity,
         // Add any additional indicators found
-        indicators: [...new Set([...analysis.indicators, ...(validationResult.additionalIndicators || [])])]
+        indicators: [...new Set([...analysis.indicators, ...(validationResult.additionalIndicators || [])])],
+        validatedAt: new Date(),
+        lastValidation,
       }
     });
 

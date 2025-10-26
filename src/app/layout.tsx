@@ -13,13 +13,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AGI Monitor - Early Detection System",
-  description: "Advanced monitoring system for detecting early signs of Artificial General Intelligence emergence",
-  keywords: "AGI, artificial general intelligence, AI monitoring, superintelligence detection",
-  authors: [{ name: "AGI Monitor Team" }],
+  title: "ASI/AGI Monitor — Early Detection System",
+  description:
+    "Monitoring signals of Artificial Superintelligence (ASI) and Artificial General Intelligence (AGI) across labs, papers, and news.",
+  keywords:
+    "ASI, artificial superintelligence, AGI, artificial general intelligence, AI monitoring, superintelligence detection, research trends",
+  authors: [{ name: "ASI/AGI Monitor Team" }],
   openGraph: {
-    title: "AGI Monitor",
-    description: "Monitoring the emergence of Artificial General Intelligence",
+    title: "ASI/AGI Monitor",
+    description:
+      "Early detection of ASI/AGI signals from research labs, academia, and industry.",
     type: "website",
   },
 };

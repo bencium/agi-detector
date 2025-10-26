@@ -26,6 +26,17 @@ interface AnalysisResult {
   evidenceQuality?: string;
   requiresVerification?: boolean;
   crossReferences?: string[];
+  crawl?: { url?: string; title?: string };
+  validatedAt?: string;
+  lastValidation?: {
+    prevScore?: number;
+    newScore?: number;
+    prevConfidence?: number;
+    newConfidence?: number;
+    addedIndicators?: number;
+    recommendation?: string;
+    timestamp?: string;
+  };
 }
 
 const shouldRunDailyCrawl = (lastRunTime: string | null): boolean => {
@@ -53,7 +64,33 @@ export default function Home(): React.ReactElement {
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [totalAnalyzed, setTotalAnalyzed] = useState(0);
+  const [validationMeta, setValidationMeta] = useState<Record<string, {
+    prevScore: number;
+    newScore: number;
+    prevConfidence: number;
+    newConfidence: number;
+    addedIndicators: number;
+    recommendation: string;
+    timestamp: string;
+  }>>({});
   const { logs, addLog, clearLogs } = useConsoleCapture();
+
+  const scrollToAnalysis = (analysisId: string | null) => {
+    if (!analysisId) return;
+    setActiveTab('analysis');
+    setTimeout(() => {
+      const el = document.getElementById(`analysis-card-${analysisId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  };
+
+  const jumpToMostSevere = () => {
+    if (analyses.length === 0) return;
+    const rank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
+    const sorted = [...analyses].sort((a, b) => (rank[(b.severity || 'none').toLowerCase()] ?? 0) - (rank[(a.severity || 'none').toLowerCase()] ?? 0));
+    const target = sorted.find(a => (a.severity || '').toLowerCase() === 'critical') || sorted[0];
+    scrollToAnalysis(target.id);
+  };
 
   const formatDateTime = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -288,6 +325,24 @@ export default function Home(): React.ReactElement {
         const oldScore = oldAnalysis?.score || 0;
         const newScore = newAnalysis.score || 0;
         const newIndicators = data.data.validation.additionalIndicators?.length || 0;
+        const oldConfidence = oldAnalysis?.confidence || 0;
+        const newConfidence = newAnalysis.confidence || 0;
+        const recommendation = data.data.validation.recommendation || 'investigate';
+        const nowIso = new Date().toISOString();
+
+        // Persist diff inline for this session
+        setValidationMeta(prev => ({
+          ...prev,
+          [analysisId]: {
+            prevScore: oldScore,
+            newScore,
+            prevConfidence: oldConfidence,
+            newConfidence,
+            addedIndicators: newIndicators,
+            recommendation,
+            timestamp: nowIso,
+          }
+        }));
         
         addLog(`✅ Validation complete: ${data.data.validation.recommendation}`);
         
@@ -343,6 +398,7 @@ export default function Home(): React.ReactElement {
   };
 
   const riskLevel = getAGIRiskLevel();
+  const criticalCount = analyses.filter(a => (a.severity || '').toLowerCase() === 'critical').length;
 
   return (
     <div className="min-h-screen bg-[var(--background)]">
@@ -354,7 +410,7 @@ export default function Home(): React.ReactElement {
               <div className="w-8 h-8 bg-[var(--accent)] rounded-md flex items-center justify-center">
                 <span className="text-white font-bold text-lg">A</span>
               </div>
-              <h1 className="text-xl font-semibold text-[var(--foreground)]">AGI Monitor</h1>
+              <h1 className="text-xl font-semibold text-[var(--foreground)]">ASI/AGI Monitor</h1>
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-right">
@@ -364,6 +420,15 @@ export default function Home(): React.ReactElement {
                 <div className="text-xs text-[var(--muted)]">
                   {riskLevel.details}
                 </div>
+                {criticalCount > 0 && (
+                  <button
+                    onClick={jumpToMostSevere}
+                    className="mt-1 inline-flex items-center text-xs text-[var(--accent)] hover:underline"
+                    title="Jump to most severe finding"
+                  >
+                    View {criticalCount} critical {criticalCount === 1 ? 'finding' : 'findings'}
+                  </button>
+                )}
               </div>
               <div className={`w-3 h-3 rounded-full ${isAutoCrawling ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} title={isAutoCrawling ? 'Monitoring active' : 'Monitoring inactive'} />
             </div>
@@ -619,8 +684,16 @@ export default function Home(): React.ReactElement {
                 <p className="text-[var(--muted)]">Crawl data will be automatically analyzed for AGI indicators</p>
               </div>
             ) : (
-              analyses.map((analysis) => (
-                <div key={analysis.id} className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
+              [...analyses]
+                .sort((a, b) => {
+                  const rank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
+                  const ra = rank[(a.severity || 'none').toLowerCase()] ?? 0;
+                  const rb = rank[(b.severity || 'none').toLowerCase()] ?? 0;
+                  if (rb !== ra) return rb - ra;
+                  return (b.score || 0) - (a.score || 0);
+                })
+                .map((analysis) => (
+                <div id={`analysis-card-${analysis.id}`} key={analysis.id} className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center space-x-4">
                       <div className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -650,21 +723,30 @@ export default function Home(): React.ReactElement {
                         </span>
                       )}
                     </div>
-                    {analysis.requiresVerification && (
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => validateAnalysis(analysis.id)}
-                          disabled={validatingId === analysis.id}
-                          className="px-3 py-1 text-sm bg-[var(--accent)] text-white rounded-lg hover:bg-[var(--accent-hover)] disabled:opacity-50"
-                          title="Get a second AI opinion to find additional AGI indicators"
-                        >
-                          {validatingId === analysis.id ? 'Validating...' : 'Validate'}
-                        </button>
-                        <span className="text-xs text-[var(--muted)]">
-                          Get 2nd opinion
-                        </span>
-                      </div>
-                    )}
+                    {(() => {
+                      const severityRank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
+                      const minSeverity = (process.env.NEXT_PUBLIC_VALIDATION_MIN_SEVERITY || 'medium').toLowerCase();
+                      const minRank = severityRank[minSeverity] ?? 2;
+                      const sev = (analysis.severity || 'none').toLowerCase();
+                      const always = process.env.NEXT_PUBLIC_VALIDATION_ALWAYS === 'true';
+                      const meetsSeverity = (severityRank[sev] ?? 0) >= minRank;
+                      const flag = !!analysis.requiresVerification;
+                      const showValidate = always || meetsSeverity || flag;
+                      if (!showValidate) return null;
+                      return (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => validateAnalysis(analysis.id)}
+                            disabled={validatingId === analysis.id}
+                            className="px-3 py-1 text-sm bg-[var(--accent)] text-white rounded-lg hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                            title="Get a second AI opinion to find additional AGI indicators"
+                          >
+                            {validatingId === analysis.id ? 'Validating...' : 'Validate'}
+                          </button>
+                          <span className="text-xs text-[var(--muted)]">Get 2nd opinion</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   
                   {analysis.indicators.length > 0 && (
@@ -689,6 +771,48 @@ export default function Home(): React.ReactElement {
                     </div>
                   )}
                   
+                  {/* Source link */}
+                  {analysis.crawl?.url && (
+                    <div className="mb-3">
+                      <a
+                        href={analysis.crawl.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-[var(--accent)] hover:underline"
+                        title={analysis.crawl.url}
+                      >
+                        View source: {new URL(analysis.crawl.url).hostname}
+                      </a>
+                    </div>
+                  )}
+                  
+                  {/* Inline validation diff */}
+                  {(analysis.lastValidation || validationMeta[analysis.id]) && (
+                    <div className="mb-3 text-xs text-[var(--muted)]">
+                      <div>
+                        Last validated: {formatDateTime(new Date((analysis.lastValidation?.timestamp || analysis.validatedAt || validationMeta[analysis.id]?.timestamp) || new Date().toISOString()))}
+                      </div>
+                      <div>
+                        {(() => {
+                          const meta = analysis.lastValidation || validationMeta[analysis.id];
+                          if (!meta) return null;
+                          return (
+                            <>
+                              Score: {((meta.prevScore || analysis.score) * 100).toFixed(0)}% → {((meta.newScore || analysis.score) * 100).toFixed(0)}% ·
+                              Confidence: {((meta.prevConfidence || analysis.confidence) * 100).toFixed(0)}% → {((meta.newConfidence || analysis.confidence) * 100).toFixed(0)}%
+                              {(meta.addedIndicators || 0) > 0 && (
+                                <> · +{meta.addedIndicators} indicators</>
+                              )}
+                              {meta.recommendation && (
+                                <> · {meta.recommendation}</>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-sm text-[var(--muted)] leading-relaxed">{analysis.explanation}</p>
                 </div>
               ))

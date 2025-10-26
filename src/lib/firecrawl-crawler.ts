@@ -11,8 +11,8 @@ interface CrawledArticle {
   };
 }
 
-// Initialize Firecrawl with API key from environment
-const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || 'fc-4a3d7c98f2c44eb382b6f0e84e9c83f7';
+// Initialize Firecrawl with API key from environment (no default)
+const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 
 // Track API usage to respect limits
 let firecrawlUsageCount = 0;

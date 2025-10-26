@@ -1,9 +1,5 @@
 import OpenAI from 'openai';
 
-// Debug logging
-console.log('[OpenAI] Initializing with API key:', !!(process.env.API_KEY || process.env.OPENAI_API_KEY));
-console.log('[OpenAI] API key length:', (process.env.API_KEY || process.env.OPENAI_API_KEY || '').length);
-
 // Initialize OpenAI client
 export const openai = new OpenAI({
   apiKey: process.env.API_KEY || process.env.OPENAI_API_KEY,

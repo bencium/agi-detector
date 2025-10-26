@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { openai, AGI_DETECTION_PROMPT } from '@/lib/openai';
+import { computeSeverity } from '@/lib/severity';
 
 // Debug logging
 console.log('[Analyze All] Module loaded, OpenAI client:', !!openai);
@@ -28,17 +29,19 @@ async function analyzeArticle(crawlResult: any, logs: string[] = []) {
     console.log(analyzeMsg);
     logs.push(analyzeMsg);
     
-    // Analyze content using OpenAI
+    // Analyze content using OpenAI (default gpt-5-mini with low reasoning)
     let completion;
     try {
-      completion = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
+      const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+      const options: any = {
+        model,
         messages: [
           { role: "system", content: AGI_DETECTION_PROMPT },
           { role: "user", content: `Title: ${crawlResult.title}\n\nContent: ${crawlResult.content}` }
         ],
         response_format: { type: "json_object" }
-      });
+      };
+      completion = await openai.chat.completions.create(options);
     } catch (openaiError: any) {
       console.error(`[Analyze] OpenAI API Error:`, openaiError);
       console.error(`[Analyze] Error type:`, openaiError?.constructor?.name);
@@ -56,19 +59,33 @@ async function analyzeArticle(crawlResult: any, logs: string[] = []) {
     const analysisResult = JSON.parse(content);
 
     // Store analysis results
+    const severity = computeSeverity(analysisResult.score || 0, analysisResult.severity);
     const analysis = await prisma.analysisResult.create({
       data: {
         crawlId: crawlResult.id,
         score: analysisResult.score || 0,
         confidence: analysisResult.confidence || 0,
         indicators: analysisResult.indicators || [],
-        severity: analysisResult.severity || 'none',
+        severity,
         evidenceQuality: analysisResult.evidence_quality || 'speculative',
         requiresVerification: analysisResult.requires_verification || false,
         crossReferences: analysisResult.cross_references || [],
         explanation: analysisResult.explanation || 'No AGI indicators detected'
       }
     });
+
+    // Historical metrics for trend visualizations
+    try {
+      await prisma.historicalData.createMany({
+        data: [
+          { analysisId: analysis.id, metric: 'score', value: analysis.score },
+          { analysisId: analysis.id, metric: 'confidence', value: analysis.confidence },
+          { analysisId: analysis.id, metric: 'indicator_count', value: (analysis.indicators || []).length },
+        ]
+      });
+    } catch (histErr) {
+      console.warn('[Analyze All] Failed to write historical data for', analysis.id, histErr);
+    }
 
     return analysis;
   } catch (error) {
@@ -175,6 +192,45 @@ export async function POST() {
       a.severity === 'high' || a.severity === 'critical'
     ).length;
 
+    // Create trend snapshots (daily, weekly) so the Trends tab shows fresh data
+    try {
+      const now = new Date();
+      const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const dailyAnalyses = await prisma.analysisResult.findMany({ where: { timestamp: { gte: dayAgo } } });
+      if (dailyAnalyses.length > 0) {
+        const scores = dailyAnalyses.map(a => a.score);
+        await prisma.trendAnalysis.create({
+          data: {
+            period: 'daily',
+            avgScore: scores.reduce((a, b) => a + b, 0) / scores.length,
+            maxScore: Math.max(...scores),
+            minScore: Math.min(...scores),
+            totalAnalyses: dailyAnalyses.length,
+            criticalAlerts: dailyAnalyses.filter(a => a.severity === 'critical').length,
+          }
+        });
+      }
+
+      const weeklyAnalyses = await prisma.analysisResult.findMany({ where: { timestamp: { gte: weekAgo } } });
+      if (weeklyAnalyses.length > 0) {
+        const scores = weeklyAnalyses.map(a => a.score);
+        await prisma.trendAnalysis.create({
+          data: {
+            period: 'weekly',
+            avgScore: scores.reduce((a, b) => a + b, 0) / scores.length,
+            maxScore: Math.max(...scores),
+            minScore: Math.min(...scores),
+            totalAnalyses: weeklyAnalyses.length,
+            criticalAlerts: weeklyAnalyses.filter(a => a.severity === 'critical').length,
+          }
+        });
+      }
+    } catch (trendErr) {
+      console.warn('[Analyze All] Trend snapshot creation failed:', trendErr);
+    }
+
     return NextResponse.json({ 
       success: true,
       logs,
@@ -199,7 +255,7 @@ export async function POST() {
     console.log('[Analyze All] Error name:', errorName);
     
     // Check if it's an OpenAI API error
-    if (errorMessage.includes('model') || errorMessage.includes('gpt-4.1')) {
+    if (errorMessage.includes('model') || errorMessage.includes('gpt-4.1') || errorMessage.includes('gpt-5')) {
       console.log('[Analyze All] Possible OpenAI Model Error');
     }
     

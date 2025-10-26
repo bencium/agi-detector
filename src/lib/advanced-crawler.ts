@@ -5,6 +5,7 @@ import UserAgent from 'user-agents';
 import { parseStringPromise } from 'xml2js';
 import { RateLimiter as Limiter } from 'limiter';
 import { crawlWithFirecrawl } from './firecrawl-crawler';
+import { braveWebSearch } from './brave-search';
 
 interface CrawledArticle {
   title: string;
@@ -235,7 +236,35 @@ export class AdvancedCrawler {
         }
       },
       
-      // Strategy 2: Simple fetch with advanced headers
+      // Strategy 2: Brave Search (fast, robust fallback if available)
+      {
+        name: 'Brave Search',
+        execute: async () => {
+          if (!process.env.BRAVE_API_KEY) return [];
+          try {
+            const host = new URL(this.source.url).host;
+            let q = `site:${host}`;
+            if (this.source.name === 'Anthropic Blog') q += ' (news OR blog) (AI OR research)';
+            if (this.source.name === 'DeepMind Research') q += ' (blog OR research)';
+            const results = await braveWebSearch(q, { count: 6, freshness: 'pm', country: 'us' });
+            return (results || []).map((r) => ({
+              title: r.title,
+              content: r.snippet || 'Search result from Brave; open the URL for full content.',
+              url: r.url,
+              metadata: {
+                source: this.source.name,
+                timestamp: new Date().toISOString(),
+                id: `${this.source.name}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+              }
+            }));
+          } catch (e) {
+            console.log(`[Brave Search] Failed for ${this.source.name}: ${e}`);
+            return [];
+          }
+        }
+      },
+
+      // Strategy 3: Simple fetch with advanced headers
       {
         name: 'Advanced Fetch',
         execute: async () => {
@@ -292,8 +321,8 @@ export class AdvancedCrawler {
           return [];
         }
       },
-      
-      // Strategy 3: Firecrawl ONLY for blocked sources (DeepMind & Anthropic)
+
+      // Strategy 4: Firecrawl ONLY for blocked sources (DeepMind & Anthropic)
       {
         name: 'Firecrawl',
         execute: async () => {
@@ -309,7 +338,7 @@ export class AdvancedCrawler {
         }
       },
       
-      // Strategy 4: Browser automation
+      // Strategy 5: Browser automation
       {
         name: 'Browser Automation',
         execute: async () => {
