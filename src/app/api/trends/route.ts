@@ -14,9 +14,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
 
     // Validate and parse query parameters
+    // Convert null to undefined so Zod defaults work correctly
     const validatedQuery = trendsQuerySchema.safeParse({
-      period: searchParams.get('period'),
-      limit: searchParams.get('limit')
+      period: searchParams.get('period') || undefined,
+      limit: searchParams.get('limit') || undefined
     });
 
     if (!validatedQuery.success) {

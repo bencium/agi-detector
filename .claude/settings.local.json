@@ -6,7 +6,18 @@
       "Bash(python3:*)",
       "Bash(npm update:*)",
       "Bash(npm run build:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm run dev:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)",
+      "Bash(env)",
+      "WebSearch",
+      "Bash(psql:*)",
+      "Bash(node -e:*)",
+      "Read(//Users/bencium/.npm/_logs/**)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

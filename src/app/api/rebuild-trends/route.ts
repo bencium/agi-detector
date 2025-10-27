@@ -43,8 +43,9 @@ export async function POST(request: Request) {
     const { searchParams } = new URL(request.url);
 
     // Validate query parameters
+    // Convert null to undefined so Zod validation works correctly
     const validatedQuery = rebuildQuerySchema.safeParse({
-      period: searchParams.get('period')
+      period: searchParams.get('period') || undefined
     });
 
     if (!validatedQuery.success) {

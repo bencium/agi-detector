@@ -323,7 +323,7 @@ The crawler includes:
 - `POST /api/test-crawler` - Test individual crawler sources
  - `POST /api/backfill-historical` - One-off backfill of HistoricalData from existing analyses
  - `POST /api/backfill-severities` - One-off recompute of severities from scores (escalate-only)
- - `GET /api/db-health` - Quick DB connectivity and counts (crawl/analysis/trends)
+- `GET /api/db-health` - Quick DB connectivity and counts (crawl/analysis/trends)
   ```json
   {
     "source": {
@@ -363,6 +363,46 @@ curl -X POST http://localhost:3000/api/test-crawler \
     }
   }' | jq
 ```
+
+## 🧯 Troubleshooting: Analyze-All Hangs / Timeouts
+
+If clicking "Run Manual Scan" leads to a long spinner and no results, it’s often due to the analysis phase (`POST /api/analyze-all`) waiting on external services. We’ve hardened the endpoint to avoid indefinite hangs and added tunable timeouts.
+
+What typically causes the delay
+- OpenAI API timeouts during batch analysis (most common). You’ll see logs like:
+  - `[Analyze] Error type: APIConnectionTimeoutError` and `Request timed out.`
+- Database latency or connection issues when reading/writing analyses.
+
+How it’s mitigated in code
+- Per‑step timeouts and fast‑fail handling in `src/app/api/analyze-all/route.ts`:
+  - DB reads/writes: 10–15s cap with clear log messages.
+  - OpenAI analysis: explicit per‑request timeout and no automatic retries.
+  - Batch processing: `Promise.allSettled` with a per‑batch timeout so one slow item doesn’t stall the whole request.
+- On timeout, the API returns HTTP 504 with an array of `logs` instead of hanging.
+
+Environment tuning (recommended for dev)
+- Add these to `.env.local` to speed up responses and reduce timeouts:
+  - `OPENAI_MODEL=gpt-4o-mini` (fast, reliable)
+  - `OPENAI_TIMEOUT_MS=12000` (per‑request timeout)
+  - `ANALYZE_BATCH_SIZE=2` (lower concurrency)
+  - `BATCH_TIMEOUT_MS=18000` (per‑batch cap)
+
+Quick diagnostics
+- Check OpenAI reachability:
+  - `curl -s http://localhost:3000/api/test-openai` should return a short message.
+- Check DB health:
+  - `curl -s http://localhost:3000/api/db-health` should be 200 with counts; 503 means no DB configured.
+- Exercise analyze-all with a client timeout:
+  - `curl -i -m 45 -X POST http://localhost:3000/api/analyze-all`
+  - Expect 200 with results or 504 within ~20–40s with a JSON body including `logs`.
+
+Reading the last log line
+- Last line is “About to query database…” → DB `findMany` is stalling (pooling/network/statement timeout).
+- Shows “Found X unanalyzed articles” then “Processing batch …” with repeated OpenAI timeouts → reduce `ANALYZE_BATCH_SIZE`, increase `OPENAI_TIMEOUT_MS`, or switch model.
+- Timeouts during `DB create(analysisResult)`/`createMany(historicalData)` → investigate DB write latency; consider Neon pooled connection and statement timeout.
+
+Notes
+- The crawl step (`POST /api/crawl`) can be long, but it now runs independent of analysis timeouts. The UI triggers analyze-all after crawling; with the settings above, analysis should no longer block indefinitely.
 
 ## ⚠️ Important Notes
 

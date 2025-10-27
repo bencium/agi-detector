@@ -13,6 +13,8 @@
   --border: #e5e4e2;
   --accent: #d4a574;
   --accent-hover: #c89660;
+  --accent-cyan: #06B6D4;
+  --accent-cyan-hover: #0891B2;
   --danger: #dc3545;
   --success: #28a745;
   --warning: #ffc107;
@@ -108,4 +110,18 @@ body {
 
 .processing-button {
   animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Shimmer animation for skeleton loading */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
 }

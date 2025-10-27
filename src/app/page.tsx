@@ -5,6 +5,7 @@ import TrendChart from '@/components/TrendChart';
 import ConsoleOutput from '@/components/ConsoleOutput';
 import { useConsoleCapture } from '@/hooks/useConsoleCapture';
 import { safeJsonParse } from '@/lib/utils/safeJson';
+import { Skeleton, SkeletonStatCard, SkeletonSourceCard, SkeletonChart } from '@/components/Skeleton';
 
 interface CrawlResult {
   id: string;
@@ -412,24 +413,34 @@ export default function Home(): React.ReactElement {
               <h1 className="text-xl font-semibold text-[var(--foreground)]">ASI/AGI Monitor</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <div className="text-right">
-                <div className={`text-sm font-medium ${riskLevel.color}`}>
-                  Risk Level: {riskLevel.level}
-                </div>
-                <div className="text-xs text-[var(--muted)]">
-                  {riskLevel.details}
+              <div className="flex flex-col items-end">
+                {/* Enhanced Risk Level Badge */}
+                <div className={`inline-flex items-center space-x-2 px-3 py-1.5 rounded-full border-2 transition-all ${
+                  riskLevel.level === 'HIGH'
+                    ? 'bg-red-50 border-red-500 text-red-700' + (criticalCount > 0 ? ' animate-pulse' : '')
+                    : riskLevel.level === 'MEDIUM'
+                    ? 'bg-yellow-50 border-yellow-500 text-yellow-700'
+                    : 'bg-green-50 border-green-500 text-green-700'
+                }`}>
+                  <span className={`w-2.5 h-2.5 rounded-full ${
+                    riskLevel.level === 'HIGH' ? 'bg-red-500'
+                    : riskLevel.level === 'MEDIUM' ? 'bg-yellow-500'
+                    : 'bg-green-500'
+                  }`} />
+                  <span className="text-sm font-semibold">{riskLevel.level} Risk</span>
                 </div>
                 {criticalCount > 0 && (
                   <button
                     onClick={jumpToMostSevere}
-                    className="mt-1 inline-flex items-center text-xs text-[var(--accent)] hover:underline"
+                    className="mt-2 inline-flex items-center text-xs font-medium"
+                    style={{ color: 'var(--accent-cyan)' }}
                     title="Jump to most severe finding"
                   >
-                    View {criticalCount} critical {criticalCount === 1 ? 'finding' : 'findings'}
+                    View {criticalCount} critical {criticalCount === 1 ? 'finding' : 'findings'} →
                   </button>
                 )}
               </div>
-              <div className={`w-3 h-3 rounded-full ${isAutoCrawling ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} title={isAutoCrawling ? 'Monitoring active' : 'Monitoring inactive'} />
+              <div className={`w-3 h-3 rounded-full transition-colors ${isAutoCrawling ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} title={isAutoCrawling ? 'Monitoring active' : 'Monitoring inactive'} />
             </div>
           </div>
         </div>
@@ -471,29 +482,57 @@ export default function Home(): React.ReactElement {
           <div className="space-y-6 animate-fade-in">
             {/* Hero Section */}
             <div className="bg-[var(--surface)] rounded-xl p-8 border border-[var(--border)] shadow-sm">
-              <h2 className="text-2xl font-bold text-[var(--foreground)] mb-4">
+              <h2 className="text-3xl font-bold text-[var(--foreground)] mb-3 tracking-tight">
                 Monitoring AGI Emergence
               </h2>
-              <p className="text-[var(--muted)] mb-6 leading-relaxed">
-                This system continuously monitors AI research labs, academic papers, and technology news 
-                for indicators of artificial general intelligence emergence. Using advanced pattern recognition, 
+              <p className="text-[var(--muted)] mb-6" style={{ lineHeight: '1.7' }}>
+                This system continuously monitors AI research labs, academic papers, and technology news
+                for indicators of artificial general intelligence emergence. Using advanced pattern recognition,
                 we analyze developments across multiple domains to identify potential AGI breakthroughs.
               </p>
               
               {/* Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-[var(--surface-hover)] rounded-lg p-4">
-                  <div className="text-sm text-[var(--muted)] mb-1">Sources Monitored</div>
-                  <div className="text-2xl font-semibold text-[var(--foreground)]">7</div>
-                </div>
-                <div className="bg-[var(--surface-hover)] rounded-lg p-4">
-                  <div className="text-sm text-[var(--muted)] mb-1">Total Articles</div>
-                  <div className="text-2xl font-semibold text-[var(--foreground)]">{crawlResults.length}</div>
-                </div>
-                <div className="bg-[var(--surface-hover)] rounded-lg p-4">
-                  <div className="text-sm text-[var(--muted)] mb-1">Articles Analyzed</div>
-                  <div className="text-2xl font-semibold text-[var(--foreground)]">{analyses.length}</div>
-                </div>
+                {isInitialLoading ? (
+                  <>
+                    <SkeletonStatCard />
+                    <SkeletonStatCard />
+                    <SkeletonStatCard />
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-[var(--surface-hover)] border-l-4 rounded-lg p-5 transition-all hover:scale-[1.02] hover:shadow-md"
+                      style={{ borderColor: 'var(--accent-cyan)' }}>
+                      <div className="text-sm font-medium mb-2" style={{ color: 'var(--accent-cyan)' }}>
+                        Active Sources
+                      </div>
+                      <div className="flex items-baseline space-x-2">
+                        <div className="text-3xl font-bold text-[var(--foreground)]">7</div>
+                        <div className="text-sm text-[var(--muted)]">monitoring</div>
+                      </div>
+                    </div>
+                    <div className="bg-[var(--surface-hover)] border-l-4 border-[var(--accent)] rounded-lg p-5 transition-all hover:scale-[1.02] hover:shadow-md">
+                      <div className="text-sm text-[var(--muted)] font-medium mb-2">Total Articles</div>
+                      <div className="flex items-baseline space-x-2">
+                        <div className="text-3xl font-bold text-[var(--foreground)]">{crawlResults.length}</div>
+                        {crawlResults.length > 0 && (
+                          <div className="text-sm text-green-600 flex items-center">
+                            <span>↑</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-[var(--surface-hover)] border-l-4 border-gray-400 rounded-lg p-5 transition-all hover:scale-[1.02] hover:shadow-md">
+                      <div className="text-sm text-[var(--muted)] font-medium mb-2">Analyzed</div>
+                      <div className="flex items-baseline space-x-2">
+                        <div className="text-3xl font-bold text-[var(--foreground)]">{analyses.length}</div>
+                        <div className="text-sm text-[var(--muted)]">
+                          of {crawlResults.length}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Action Buttons */}
@@ -546,10 +585,19 @@ export default function Home(): React.ReactElement {
             {/* Monitored Sources */}
             <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-[var(--foreground)]">Monitored Sources</h3>
+                <div>
+                  <h3 className="text-lg font-semibold text-[var(--foreground)]">Monitored Sources</h3>
+                  {!isInitialLoading && (
+                    <p className="text-xs mt-1 flex items-center space-x-1">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent-cyan)' }} />
+                      <span style={{ color: 'var(--accent-cyan)' }}>All systems operational</span>
+                    </p>
+                  )}
+                </div>
                 <button
                   onClick={loadExistingData}
-                  className="text-sm text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                  className="text-sm transition-colors hover:scale-110"
+                  style={{ color: 'var(--accent-cyan)' }}
                   title="Refresh counts"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -558,40 +606,58 @@ export default function Home(): React.ReactElement {
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {[
-                  { name: 'OpenAI Blog', displayName: 'OpenAI', type: 'Research Lab', url: 'openai.com' },
-                  { name: 'DeepMind Research', displayName: 'DeepMind', type: 'Research Lab', url: 'deepmind.com' },
-                  { name: 'Anthropic Blog', displayName: 'Anthropic', type: 'Research Lab', url: 'anthropic.com' },
-                  { name: 'Microsoft AI Blog', displayName: 'Microsoft AI', type: 'Corporate Lab', url: 'microsoft.com/ai' },
-                  { name: 'arXiv AI', displayName: 'arXiv AI', type: 'Academic', url: 'arxiv.org' },
-                  { name: 'TechCrunch AI', displayName: 'TechCrunch', type: 'News', url: 'techcrunch.com' },
-                  { name: 'VentureBeat AI', displayName: 'VentureBeat', type: 'News', url: 'venturebeat.com' },
-                ].map((source) => {
-                  const count = sourceStats[source.name] || 0;
-                  // Show as working if it has articles OR if it's a known working source
-                  const isWorking = count > 0 || ['OpenAI Blog', 'Microsoft AI Blog', 'TechCrunch AI', 'VentureBeat AI', 'arXiv AI', 'DeepMind Research', 'Anthropic Blog'].includes(source.name);
-                  
-                  return (
-                    <div key={source.name} className="bg-[var(--surface-hover)] rounded-lg p-3 hover:shadow-md transition-shadow relative">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="font-medium text-[var(--foreground)]">{source.displayName}</div>
-                          <div className="text-xs text-[var(--muted)]">{source.type}</div>
-                        </div>
-                        <div className="flex items-center space-x-2">
+                {isInitialLoading ? (
+                  <>
+                    {[...Array(7)].map((_, i) => (
+                      <SkeletonSourceCard key={i} />
+                    ))}
+                  </>
+                ) : (
+                  [
+                    { name: 'OpenAI Blog', displayName: 'OpenAI', type: 'Research Lab', url: 'openai.com' },
+                    { name: 'DeepMind Research', displayName: 'DeepMind', type: 'Research Lab', url: 'deepmind.com' },
+                    { name: 'Anthropic Blog', displayName: 'Anthropic', type: 'Research Lab', url: 'anthropic.com' },
+                    { name: 'Microsoft AI Blog', displayName: 'Microsoft AI', type: 'Corporate Lab', url: 'microsoft.com/ai' },
+                    { name: 'arXiv AI', displayName: 'arXiv AI', type: 'Academic', url: 'arxiv.org' },
+                    { name: 'TechCrunch AI', displayName: 'TechCrunch', type: 'News', url: 'techcrunch.com' },
+                    { name: 'VentureBeat AI', displayName: 'VentureBeat', type: 'News', url: 'venturebeat.com' },
+                  ].map((source) => {
+                    const count = sourceStats[source.name] || 0;
+                    const isWorking = count > 0 || ['OpenAI Blog', 'Microsoft AI Blog', 'TechCrunch AI', 'VentureBeat AI', 'arXiv AI', 'DeepMind Research', 'Anthropic Blog'].includes(source.name);
+                    const statusColor = isWorking ? 'bg-green-500' : 'bg-gray-400';
+                    const borderColor = isWorking ? 'border-green-500' : 'border-gray-400';
+                    const statusText = count > 0 ? 'Working' : isWorking ? 'Active' : 'Limited';
+
+                    return (
+                      <div
+                        key={source.name}
+                        className={`bg-[var(--surface-hover)] rounded-lg p-4 border-l-4 transition-all hover:shadow-lg hover:scale-[1.02] ${borderColor}`}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <div className="font-medium text-[var(--foreground)] mb-0.5">{source.displayName}</div>
+                            <div className="text-xs text-[var(--muted)]">{source.type}</div>
+                          </div>
                           {count > 0 && (
-                            <span className="text-xs font-medium bg-[var(--accent)] text-white px-2 py-1 rounded-full">
+                            <span className="text-xs font-semibold px-2 py-1 rounded-full"
+                              style={{ backgroundColor: 'var(--accent-cyan)', color: 'white' }}>
                               {count}
                             </span>
                           )}
-                          <div className={`w-2 h-2 rounded-full ${
-                            isWorking ? 'bg-green-500' : 'bg-gray-400'
-                          }`} title={isWorking ? 'Active' : 'Blocked'} />
+                        </div>
+                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-[var(--border)]">
+                          <div className="flex items-center space-x-1.5">
+                            <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                            <span className="text-xs font-medium text-[var(--muted)]">{statusText}</span>
+                          </div>
+                          <div className="text-xs text-[var(--muted)]">
+                            {count > 0 && `${count} ${count === 1 ? 'article' : 'articles'}`}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
 
