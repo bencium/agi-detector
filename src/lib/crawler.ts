@@ -77,7 +77,49 @@ export const SOURCES = {
       titleSelector: '.list-title',
       contentSelector: '.list-authors, .list-comments, .list-subjects',
       linkSelector: 'dt a:first-child',
-      isSpecial: true, // Special handling for arXiv structure
+      isSpecial: true,
+      transform: {
+        title: (text: string) => text.replace(/^Title:\s+/, '').trim(),
+        content: (text: string) => text.replace(/\n+/g, ' ').trim(),
+        url: (url: string) => url.startsWith('http') ? url : `https://arxiv.org${url}`,
+      }
+    },
+    {
+      name: 'arXiv Machine Learning',
+      url: 'https://arxiv.org/list/cs.LG/recent',
+      selector: 'dd',
+      titleSelector: '.list-title',
+      contentSelector: '.list-authors, .list-comments, .list-subjects',
+      linkSelector: 'dt a:first-child',
+      isSpecial: true,
+      transform: {
+        title: (text: string) => text.replace(/^Title:\s+/, '').trim(),
+        content: (text: string) => text.replace(/\n+/g, ' ').trim(),
+        url: (url: string) => url.startsWith('http') ? url : `https://arxiv.org${url}`,
+      }
+    },
+    {
+      name: 'arXiv Computation and Language',
+      url: 'https://arxiv.org/list/cs.CL/recent',
+      selector: 'dd',
+      titleSelector: '.list-title',
+      contentSelector: '.list-authors, .list-comments, .list-subjects',
+      linkSelector: 'dt a:first-child',
+      isSpecial: true,
+      transform: {
+        title: (text: string) => text.replace(/^Title:\s+/, '').trim(),
+        content: (text: string) => text.replace(/\n+/g, ' ').trim(),
+        url: (url: string) => url.startsWith('http') ? url : `https://arxiv.org${url}`,
+      }
+    },
+    {
+      name: 'arXiv Computer Vision',
+      url: 'https://arxiv.org/list/cs.CV/recent',
+      selector: 'dd',
+      titleSelector: '.list-title',
+      contentSelector: '.list-authors, .list-comments, .list-subjects',
+      linkSelector: 'dt a:first-child',
+      isSpecial: true,
       transform: {
         title: (text: string) => text.replace(/^Title:\s+/, '').trim(),
         content: (text: string) => text.replace(/\n+/g, ' ').trim(),

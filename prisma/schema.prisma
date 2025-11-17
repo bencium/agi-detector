@@ -12,6 +12,8 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+  // Support for optional direct URL (Neon-specific)
+  relationMode = "prisma"
 }
 
 model CrawlResult {
@@ -42,12 +44,31 @@ model AnalysisResult {
   validatedAt       DateTime?
   lastValidation    Json?
 
+  // Accuracy tracking fields
+  groundTruthLabel  String?  // true_positive, false_positive, true_negative, false_negative
+  groundTruthScore  Float?   // Expert-validated AGI relevance score (0-1)
+  groundTruthNotes  String?  @db.Text
+  reviewedBy        String?  // Expert/reviewer ID
+  reviewedAt        DateTime?
+
+  // Advanced analysis fields
+  embedding         Float[]  // Semantic embedding vector for similarity matching
+  language          String?  // Detected language (ISO 639-1 code)
+  translatedContent String?  @db.Text // English translation if non-English
+  filteredByHeuristics Boolean @default(false) // Pre-filtered by keyword heuristics
+  heuristicScore    Float?   // Heuristic pre-filter score (0-1)
+  mediaNoiseScore   Float?   // Score indicating marketing/hype language (0-1, higher = more noise)
+  containsCode      Boolean @default(false)
+  containsMath      Boolean @default(false)
+
   crawl CrawlResult @relation(fields: [crawlId], references: [id])
   historicalData HistoricalData[]
 
   @@index([score])
   @@index([timestamp])
   @@index([severity])
+  @@index([groundTruthLabel])
+  @@index([language])
 }
 
 model HistoricalData {
@@ -72,6 +93,61 @@ model TrendAnalysis {
   totalAnalyses   Int
   criticalAlerts  Int
   timestamp       DateTime @default(now())
-  
+
   @@index([period, timestamp])
+}
+
+model AccuracyMetrics {
+  id                String   @id @default(uuid())
+  period            String   // daily, weekly, monthly, all_time
+  timestamp         DateTime @default(now())
+
+  // Core metrics
+  truePositives     Int
+  falsePositives    Int
+  trueNegatives     Int
+  falseNegatives    Int
+
+  // Calculated metrics
+  precision         Float  // TP / (TP + FP)
+  recall            Float  // TP / (TP + FN)
+  f1Score           Float  // 2 * (precision * recall) / (precision + recall)
+  accuracy          Float  // (TP + TN) / (TP + TN + FP + FN)
+  falsePositiveRate Float  // FP / (FP + TN)
+  falseNegativeRate Float  // FN / (FN + TP)
+
+  // Additional context
+  totalReviewed     Int
+  avgConfidence     Float?
+  notes             String? @db.Text
+
+  @@index([period, timestamp])
+}
+
+model SourceMetrics {
+  id                String   @id @default(uuid())
+  sourceName        String
+  sourceType        String   // research_blog, news, academic, social, code_repo
+  timestamp         DateTime @default(now())
+
+  // Crawl metrics
+  totalArticles     Int
+  successfulCrawls  Int
+  failedCrawls      Int
+  avgResponseTime   Float?   // milliseconds
+
+  // Quality metrics
+  avgAgiScore       Float?
+  highSeverityCount Int
+  falsePositiveRate Float?
+
+  // Reliability
+  uptime            Float?   // percentage
+  lastSuccessful    DateTime?
+  lastFailure       DateTime?
+  errorRate         Float?
+
+  @@index([sourceName])
+  @@index([sourceType])
+  @@index([timestamp])
 }
