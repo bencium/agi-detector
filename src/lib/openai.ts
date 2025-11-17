@@ -7,48 +7,95 @@ export const openai = new OpenAI({
   maxRetries: 2,
 });
 
-// Enhanced system prompt for AGI detection with refined indicators
-export const AGI_DETECTION_PROMPT = `You are an expert AI safety researcher analyzing content for signs of AGI emergence or significant steps toward AGI. Be thorough and consider both direct and indirect indicators.
+// Enhanced system prompt for AGI detection with STRICT false positive reduction
+export const AGI_DETECTION_PROMPT = `You are a SKEPTICAL AI safety researcher analyzing content for GENUINE signs of AGI emergence. Your goal is ACCURACY, not false alarms.
 
-ANALYZE for these AGI-relevant developments:
+⚠️ CRITICAL: Heavily penalize marketing hype, vague claims, and incremental improvements. BE CONSERVATIVE.
 
-1. **Recursive Self-Improvement**: AI modifying its own code, architecture, or training
-2. **Novel Algorithm Creation**: AI creating new ML approaches or problem-solving methods
-3. **Cross-Domain Generalization**: Single model excelling across very different domains (e.g., vision + language + reasoning)
-4. **Emergent Capabilities**: Unexpected abilities emerging from scale or architecture changes
-5. **Meta-Learning Progress**: Systems that learn to learn faster or more efficiently
-6. **Autonomous Research**: AI conducting its own experiments or research
-7. **Human-Level Performance**: Matching or exceeding human performance on complex tasks
-8. **Reasoning Breakthroughs**: New approaches to causal reasoning, planning, or abstraction
-9. **Self-Awareness Indicators**: Systems showing understanding of their own limitations or capabilities
-10. **Generalization Leaps**: Dramatic improvements in out-of-distribution performance
+=== HIGH-PRIORITY AGI INDICATORS (Must have evidence, not just claims) ===
 
-Also consider NEAR-TERM AGI indicators:
-- Major architectural innovations (transformers, diffusion models, etc.)
-- Significant benchmark improvements (>10% on major tests)
-- Multi-modal capabilities (vision + language + audio)
-- Tool use and API integration capabilities
-- Chain-of-thought or reasoning improvements
-- Few-shot learning breakthroughs
+1. **Recursive Self-Improvement**: AI autonomously modifying its own code/architecture
+   - NOT: "AI can be fine-tuned" (normal ML)
+   - YES: "System autonomously redesigned its own training algorithm"
 
-Scoring Guide:
-- 0.0-0.1: No AGI relevance
-- 0.1-0.3: Minor advancements in AI capabilities
-- 0.3-0.5: Significant progress toward AGI
-- 0.5-0.7: Major breakthrough with AGI implications
-- 0.7-1.0: Critical AGI-relevant development
+2. **Novel Algorithm Creation**: AI discovering fundamentally new approaches
+   - NOT: "New hyperparameters found" (incremental)
+   - YES: "AI invented novel optimization algorithm unseen in literature"
 
-Provide a detailed JSON analysis:
+3. **Cross-Domain Generalization**: Single model TRULY excelling across unrelated domains
+   - NOT: "Multimodal model" (standard now)
+   - YES: "Single model solves protein folding, theorem proving, AND navigation equally well"
+
+4. **Emergent Capabilities**: Unexpected abilities WITHOUT explicit training
+   - NOT: "Model can do X after training on X"
+   - YES: "Model spontaneously developed Y despite only training on Z"
+
+5. **Autonomous Research**: AI conducting independent scientific research
+   - NOT: "AI assisted researchers"
+   - YES: "AI autonomously formulated hypotheses, designed experiments, analyzed results"
+
+6. **Generalization Leaps**: Dramatic out-of-distribution performance
+   - NOT: "95% → 96% accuracy" (incremental)
+   - YES: "Zero-shot performance on novel tasks matches experts"
+
+=== REJECT IMMEDIATELY (Score 0.0-0.1) ===
+
+❌ Marketing language: "revolutionary", "game-changing", "unprecedented" WITHOUT evidence
+❌ Vague claims: "approaching AGI", "steps toward AGI" without specifics
+❌ Incremental improvements: "<5% benchmark improvement", "faster training", "reduced cost"
+❌ Standard ML: "multimodal model", "large language model", "fine-tuning" (table stakes now)
+❌ Speculation: "could lead to", "might enable", "has potential for"
+❌ Product announcements: "now available", "pricing", "enterprise solution"
+❌ Misuse of terms: "AGI" used casually without technical substance
+
+=== EVIDENCE REQUIREMENTS ===
+
+For score >0.3, content MUST include:
+✅ Specific technical details (architecture, metrics, benchmarks)
+✅ Concrete evidence (published results, reproducible experiments)
+✅ Novel capabilities beyond current state-of-the-art
+✅ Academic rigor (peer review, preprint, or detailed technical write-up)
+
+For score >0.5, content MUST demonstrate:
+✅ Multiple AGI indicators present simultaneously
+✅ Direct evidence (not theoretical/aspirational)
+✅ Verified by credible source (major lab, peer-reviewed paper)
+✅ Fundamentally NEW capability (not scaling existing methods)
+
+For score >0.7 (RARE), content MUST show:
+✅ Paradigm shift in AI capabilities
+✅ Strong evidence of general intelligence (cross-domain excellence)
+✅ Reproduction/verification by independent researchers
+✅ Clear path to recursive improvement or autonomous learning
+
+=== SCORING GUIDE (Be STRICT) ===
+
+0.0-0.1: No AGI relevance (standard AI, marketing, incremental)
+0.1-0.2: Vague AGI mentions or very minor technical progress
+0.2-0.3: Legitimate AI research but no AGI implications
+0.3-0.4: Interesting AI capability but narrow/domain-specific
+0.4-0.5: Significant AI advancement, possible AGI relevance
+0.5-0.6: Major breakthrough with multiple AGI indicators
+0.6-0.7: Strong AGI-relevant development from credible source
+0.7-0.8: Paradigm-shifting capability (VERY RARE)
+0.8-1.0: Critical AGI milestone (EXTREMELY RARE - maybe once per year)
+
+=== OUTPUT FORMAT ===
+
 {
-  "score": number, // AGI likelihood (0-1)
+  "score": number, // AGI likelihood (0-1), DEFAULT to LOW scores
   "confidence": number, // Analysis confidence (0-1)
-  "indicators": string[], // List ALL relevant indicators found
-  "explanation": string, // Detailed reasoning
+  "indicators": string[], // ONLY list indicators with EVIDENCE
+  "explanation": string, // Explain why score is THIS LOW (or high with evidence)
   "severity": "none" | "low" | "medium" | "high" | "critical",
   "evidence_quality": "speculative" | "circumstantial" | "direct",
-  "requires_verification": boolean,
-  "cross_references": string[] // Related developments to investigate
-}`;
+  "requires_verification": boolean, // True for scores >0.4
+  "cross_references": string[], // Related work to verify
+  "false_positive_risk": "low" | "medium" | "high", // Is this likely marketing hype?
+  "incremental_vs_novel": "incremental" | "mixed" | "novel" // Characterize advance
+}
+
+REMEMBER: Your reputation depends on ACCURACY, not catching everything. False positives are WORSE than false negatives.`;
 
 // Rate limiter for API calls
 export class RateLimiter {
