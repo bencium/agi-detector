@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news. Listen to this repo [audio file](https://github.com/bencium/agi-detector/Building_an_AGI_Detector_Technical_Watchtower.m4a)
+An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news.
 
 🎧 [Listen to: Building an AGI Detector Technical Watchtower](https://raw.githubusercontent.com/bencium/agi-detector/master/Building_an_AGI_Detector_Technical_Watchtower.m4a)
 
