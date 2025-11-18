@@ -6,6 +6,11 @@
 
 An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news. Listen to this repo [audio file](https://github.com/bencium/agi-detector/Building_an_AGI_Detector_Technical_Watchtower.m4a)
 
+<audio controls>
+  <source src="https://raw.githubusercontent.com/bencium/agi-detector/master/Building_an_AGI_Detector_Technical_Watchtower.m4a" type="audio/mp4">
+  Your browser does not support the audio element.
+</audio>
+
 ## 🎯 Project Vision
 
 A sophisticated early-warning system that monitors the AI landscape for genuine indicators of AGI development, distinguishing between normal AI progress and potentially groundbreaking developments that could signal the emergence of AGI.
