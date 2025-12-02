@@ -4,8 +4,8 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)]([https://deepwiki.com/ruvnet/ruvector](https://deepwiki.com/bencium/agi-detector))
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/bencium/agi-detector)
 
 An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news.
 
