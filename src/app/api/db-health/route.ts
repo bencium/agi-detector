@@ -1,50 +1,54 @@
 import { NextResponse } from 'next/server';
-import { prisma, isDbEnabled } from '@/lib/prisma';
+import { query, queryOne, isDbEnabled } from '@/lib/db';
 
 export async function GET() {
   if (!isDbEnabled) {
     return NextResponse.json(
-      { success: false, error: 'DATABASE_URL not set (no-DB mode).'},
+      { success: false, error: 'DATABASE_URL not set (no-DB mode).' },
       { status: 503 }
     );
   }
 
   try {
     // Simple connectivity check
-    const ping = await prisma.$queryRawUnsafe<any>('SELECT 1 as ok');
+    const ping = await queryOne<{ ok: number }>('SELECT 1 as ok');
 
     // Basic stats
     const [crawlCount, analysisCount, trendCount] = await Promise.all([
-      prisma.crawlResult.count(),
-      prisma.analysisResult.count(),
-      prisma.trendAnalysis.count(),
+      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM "CrawlResult"'),
+      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM "AnalysisResult"'),
+      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM "TrendAnalysis"')
     ]);
 
-    // Recent timestamps (if any)
-    const latestCrawl = await prisma.crawlResult.findFirst({ orderBy: { timestamp: 'desc' }, select: { timestamp: true } });
-    const latestAnalysis = await prisma.analysisResult.findFirst({ orderBy: { timestamp: 'desc' }, select: { timestamp: true } });
+    // Recent timestamps
+    const latestCrawl = await queryOne<{ timestamp: Date }>(
+      'SELECT timestamp FROM "CrawlResult" ORDER BY timestamp DESC LIMIT 1'
+    );
+    const latestAnalysis = await queryOne<{ timestamp: Date }>(
+      'SELECT timestamp FROM "AnalysisResult" ORDER BY timestamp DESC LIMIT 1'
+    );
 
     return NextResponse.json({
       success: true,
       data: {
-        ping: Array.isArray(ping) ? ping[0] : ping,
+        ping,
         counts: {
-          crawlResults: crawlCount,
-          analyses: analysisCount,
-          trends: trendCount,
+          crawlResults: Number(crawlCount?.count || 0),
+          analyses: Number(analysisCount?.count || 0),
+          trends: Number(trendCount?.count || 0)
         },
         latest: {
           crawl: latestCrawl?.timestamp ?? null,
-          analysis: latestAnalysis?.timestamp ?? null,
-        },
-      },
+          analysis: latestAnalysis?.timestamp ?? null
+        }
+      }
     });
-  } catch (error: any) {
+  } catch (error) {
+    const err = error as Error & { code?: string };
     return NextResponse.json({
       success: false,
-      error: error?.message || 'DB health check failed',
-      code: error?.code,
+      error: err?.message || 'DB health check failed',
+      code: err?.code
     }, { status: 500 });
   }
 }
-

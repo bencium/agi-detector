@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma, isDbEnabled } from '@/lib/prisma';
-import { Prisma } from '@prisma/client';
+import { query, queryOne, isDbEnabled } from '@/lib/db';
 
 export async function GET() {
   if (!isDbEnabled) {
@@ -8,9 +7,14 @@ export async function GET() {
   }
 
   try {
-    const [info] = await prisma.$queryRaw<Array<{
-      db: string; usr: string; schema: string; host: string | null; port: number | null; now: Date;
-    }>>(Prisma.sql`
+    const info = await queryOne<{
+      db: string;
+      usr: string;
+      schema: string;
+      host: string | null;
+      port: number | null;
+      now: Date;
+    }>(`
       SELECT current_database() as db,
              current_user as usr,
              current_schema() as schema,
@@ -19,26 +23,26 @@ export async function GET() {
              now() as now
     `);
 
-    const [[cr], [ar], [ta]] = await Promise.all([
-      prisma.$queryRaw<Array<{ min: Date | null; max: Date | null; cnt: number }>>(Prisma.sql`
-        SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "CrawlResult"
-      `),
-      prisma.$queryRaw<Array<{ min: Date | null; max: Date | null; cnt: number }>>(Prisma.sql`
-        SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "AnalysisResult"
-      `),
-      prisma.$queryRaw<Array<{ min: Date | null; max: Date | null; cnt: number }>>(Prisma.sql`
-        SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "TrendAnalysis"
-      `),
+    const [cr, ar, ta] = await Promise.all([
+      queryOne<{ min: Date | null; max: Date | null; cnt: string }>(
+        'SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "CrawlResult"'
+      ),
+      queryOne<{ min: Date | null; max: Date | null; cnt: string }>(
+        'SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "AnalysisResult"'
+      ),
+      queryOne<{ min: Date | null; max: Date | null; cnt: string }>(
+        'SELECT MIN("timestamp") as min, MAX("timestamp") as max, COUNT(*) as cnt FROM "TrendAnalysis"'
+      )
     ]);
 
-    // Ensure BigInt values are JSON-serializable
-    const safe = (v: any): any => {
+    // Ensure values are JSON-serializable
+    const safe = (v: unknown): unknown => {
       if (typeof v === 'bigint') return Number(v);
       if (v instanceof Date) return v.toISOString();
       if (Array.isArray(v)) return v.map(safe);
       if (v && typeof v === 'object') {
-        const o: any = {};
-        for (const [k, val] of Object.entries(v)) o[k] = safe(val as any);
+        const o: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v)) o[k] = safe(val);
         return o;
       }
       return v;
@@ -48,16 +52,17 @@ export async function GET() {
       success: true,
       env: {
         DATABASE_URL_set: !!process.env.DATABASE_URL,
-        DIRECT_URL_set: !!process.env.DIRECT_URL,
+        DIRECT_URL_set: !!process.env.DIRECT_URL
       },
       info,
       tables: {
-        CrawlResult: cr,
-        AnalysisResult: ar,
-        TrendAnalysis: ta,
-      },
+        CrawlResult: { ...cr, cnt: Number(cr?.cnt || 0) },
+        AnalysisResult: { ...ar, cnt: Number(ar?.cnt || 0) },
+        TrendAnalysis: { ...ta, cnt: Number(ta?.cnt || 0) }
+      }
     }));
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error?.message || 'DB info failed' }, { status: 500 });
+  } catch (error) {
+    const err = error as Error;
+    return NextResponse.json({ success: false, error: err?.message || 'DB info failed' }, { status: 500 });
   }
 }

@@ -4,9 +4,17 @@ import { chromium, Browser, Page } from 'playwright';
 import UserAgent from 'user-agents';
 import { parseStringPromise } from 'xml2js';
 import { RateLimiter as Limiter } from 'limiter';
-import { crawlWithFirecrawl } from './firecrawl-crawler';
 import { braveWebSearch } from './brave-search';
 import { isUrlSafe } from './security/urlValidator';
+
+// Sources that block simple HTTP requests - use Playwright as primary
+const BLOCKED_SOURCES = [
+  'OpenAI Blog',
+  'DeepMind Research',
+  'Anthropic Blog',
+  'Anthropic Research', // Research papers page (also React SPA)
+  'Microsoft AI Blog'
+];
 
 interface CrawledArticle {
   title: string;
@@ -87,7 +95,7 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
         timestamp: item.pubDate?.[0] || item.updated?.[0] || new Date().toISOString(),
         id: item.guid?.[0] || item.id?.[0] || `${sourceName}-${Date.now()}`
       }
-    })).filter(article => article.title && article.content);
+    })).filter((article: { title: string; content: string; url: string; metadata: object }) => article.title && article.content);
   } catch (error) {
     console.log(`[RSS] Failed to parse RSS feed: ${error}`);
     return [];
@@ -164,18 +172,39 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
     const articles = await page.evaluate((sel) => {
       const results: any[] = [];
       const elements = document.querySelectorAll(sel.selector);
-      
+
       elements.forEach((element) => {
-        const title = element.querySelector(sel.titleSelector)?.textContent?.trim() || '';
-        const content = element.querySelector(sel.contentSelector)?.textContent?.trim() || '';
-        const linkElement = element.querySelector(sel.linkSelector) as HTMLAnchorElement;
-        const url = linkElement?.href || '';
-        
+        let title = element.querySelector(sel.titleSelector)?.textContent?.trim() || '';
+        let content = element.querySelector(sel.contentSelector)?.textContent?.trim() || '';
+        // Handle empty linkSelector - element itself might be the link
+        let url = '';
+        if (sel.linkSelector) {
+          const linkElement = element.querySelector(sel.linkSelector) as HTMLAnchorElement;
+          url = linkElement?.href || '';
+        } else if (element instanceof HTMLAnchorElement) {
+          url = element.href;
+        }
+
+        // Special handling for Anthropic (news or research): extract from fullText if selectors fail
+        if ((sel.isAnthropicNews || sel.isAnthropicResearch) && (!title || !content)) {
+          const fullText = element.textContent?.trim() || '';
+          // Anthropic format: "CategoryDateTitleDescription" or "DateCategoryTitleDescription"
+          // Try to extract title from URL slug as backup
+          if (!title && url) {
+            const slug = url.split('/').pop() || '';
+            title = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          }
+          // Use fullText as content if no content found
+          if (!content && fullText) {
+            content = fullText.substring(0, 500); // Limit length
+          }
+        }
+
         if (title && content) {
           results.push({ title, content, url });
         }
       });
-      
+
       return results;
     }, selectors);
     
@@ -241,134 +270,135 @@ export class AdvancedCrawler {
   }
   
   async crawl(): Promise<CrawledArticle[]> {
-    const strategies: CrawlStrategy[] = [
-      // Strategy 1: Try RSS/API feeds
-      {
-        name: 'RSS Feed',
-        execute: async () => {
-          const feeds = API_ENDPOINTS[this.source.name] || [];
-          for (const feedUrl of feeds) {
-            console.log(`[${this.source.name}] Checking RSS feed: ${feedUrl}`);
-            const articles = await parseRSSFeed(feedUrl, this.source.name);
-            if (articles.length > 0) {
-              return articles;
-            }
-          }
-          return [];
-        }
-      },
-      
-      // Strategy 2: Brave Search (fast, robust fallback if available)
-      {
-        name: 'Brave Search',
-        execute: async () => {
-          if (!process.env.BRAVE_API_KEY) return [];
-          try {
-            const host = new URL(this.source.url).host;
-            let q = `site:${host}`;
-            if (this.source.name === 'Anthropic Blog') q += ' (news OR blog) (AI OR research)';
-            if (this.source.name === 'DeepMind Research') q += ' (blog OR research)';
-            const results = await braveWebSearch(q, { count: 6, freshness: 'pm', country: 'us' });
-            return (results || []).map((r) => ({
-              title: r.title,
-              content: r.snippet || 'Search result from Brave; open the URL for full content.',
-              url: r.url,
-              metadata: {
-                source: this.source.name,
-                timestamp: new Date().toISOString(),
-                id: `${this.source.name}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
-              }
-            }));
-          } catch (e) {
-            console.log(`[Brave Search] Failed for ${this.source.name}: ${e}`);
-            return [];
-          }
-        }
-      },
+    const isBlockedSource = BLOCKED_SOURCES.includes(this.source.name);
 
-      // Strategy 3: Simple fetch with advanced headers
-      {
-        name: 'Advanced Fetch',
-        execute: async () => {
-          await limiter.removeTokens(1);
-          await delay(getRandomDelay());
-          
-          try {
-            const response = await axios.get(this.source.url, {
-              headers: getHeaders(),
-              timeout: 15000,
-              maxRedirects: 5,
-              validateStatus: (status) => status < 500,
-              // Add cookie jar support
-              withCredentials: true,
-              // Decompress response
-              decompress: true,
-            });
-            
-            if (response.status === 200) {
-              const $ = cheerio.load(response.data);
-              const articles: CrawledArticle[] = [];
-              
-              $(this.source.selector).each((_, element) => {
-                const $element = $(element);
-                const title = $element.find(this.source.titleSelector).text().trim();
-                const content = $element.find(this.source.contentSelector).text().trim();
-                let url = $element.find(this.source.linkSelector).attr('href') || '';
-                
-                // Handle relative URLs
-                if (url && !url.startsWith('http')) {
-                  const baseUrl = new URL(this.source.url);
-                  url = new URL(url, baseUrl.origin).href;
-                }
-                
-                if (title && content) {
-                  articles.push({
-                    title,
-                    content,
-                    url,
-                    metadata: {
-                      source: this.source.name,
-                      timestamp: new Date().toISOString(),
-                      id: `${this.source.name}-${Date.now()}`
-                    }
-                  });
-                }
-              });
-              
-              return articles;
-            }
-          } catch (error) {
-            console.log(`[Advanced Fetch] Failed for ${this.source.name}: ${error}`);
-          }
-          return [];
-        }
-      },
+    // Build strategy list based on source type
+    const strategies: CrawlStrategy[] = [];
 
-      // Strategy 4: Firecrawl ONLY for blocked sources (DeepMind & Anthropic)
-      {
-        name: 'Firecrawl',
-        execute: async () => {
-          // ONLY use for sources that are completely blocked
-          if (['DeepMind Research', 'Anthropic Blog'].includes(this.source.name)) {
-            console.log(`[Firecrawl] Using limited API for blocked source: ${this.source.name}`);
-            
-            // Try direct crawl with Firecrawl
-            const articles = await crawlWithFirecrawl(this.source.url, this.source.name);
+    // Strategy 1: Always try RSS first (fastest, free)
+    strategies.push({
+      name: 'RSS Feed',
+      execute: async () => {
+        const feeds = API_ENDPOINTS[this.source.name] || [];
+        for (const feedUrl of feeds) {
+          console.log(`[${this.source.name}] Checking RSS feed: ${feedUrl}`);
+          const articles = await parseRSSFeed(feedUrl, this.source.name);
+          if (articles.length > 0) {
             return articles;
           }
-          return [];
         }
-      },
-      
-      // Strategy 5: Browser automation
-      {
-        name: 'Browser Automation',
+        return [];
+      }
+    });
+
+    // Strategy 2: For BLOCKED sources, use Playwright immediately after RSS fails
+    if (isBlockedSource) {
+      strategies.push({
+        name: 'Playwright (Blocked Source)',
         execute: async () => {
+          console.log(`[${this.source.name}] Using Playwright for blocked source`);
           await limiter.removeTokens(1);
           return await crawlWithBrowser(this.source.url, this.source);
         }
+      });
+    }
+
+    // Strategy 3: Simple fetch with advanced headers (works for unblocked sources)
+    strategies.push({
+      name: 'Advanced Fetch',
+      execute: async () => {
+        await limiter.removeTokens(1);
+        await delay(getRandomDelay());
+
+        try {
+          const response = await axios.get(this.source.url, {
+            headers: getHeaders(),
+            timeout: 15000,
+            maxRedirects: 5,
+            validateStatus: (status) => status < 500,
+            withCredentials: true,
+            decompress: true,
+          });
+
+          if (response.status === 200) {
+            const $ = cheerio.load(response.data);
+            const articles: CrawledArticle[] = [];
+
+            $(this.source.selector).each((_, element) => {
+              const $element = $(element);
+              const title = $element.find(this.source.titleSelector).text().trim();
+              const content = $element.find(this.source.contentSelector).text().trim();
+              let url = $element.find(this.source.linkSelector).attr('href') || '';
+
+              // Handle relative URLs
+              if (url && !url.startsWith('http')) {
+                const baseUrl = new URL(this.source.url);
+                url = new URL(url, baseUrl.origin).href;
+              }
+
+              if (title && content) {
+                articles.push({
+                  title,
+                  content,
+                  url,
+                  metadata: {
+                    source: this.source.name,
+                    timestamp: new Date().toISOString(),
+                    id: `${this.source.name}-${Date.now()}`
+                  }
+                });
+              }
+            });
+
+            return articles;
+          }
+        } catch (error) {
+          console.log(`[Advanced Fetch] Failed for ${this.source.name}: ${error}`);
+        }
+        return [];
       }
-    ];
+    });
+
+    // Strategy 4: For NON-BLOCKED sources, try Playwright as fallback
+    if (!isBlockedSource) {
+      strategies.push({
+        name: 'Playwright (Fallback)',
+        execute: async () => {
+          console.log(`[${this.source.name}] Using Playwright as fallback`);
+          await limiter.removeTokens(1);
+          return await crawlWithBrowser(this.source.url, this.source);
+        }
+      });
+    }
+
+    // Strategy 5: Brave Search as last resort (limited free tier)
+    strategies.push({
+      name: 'Brave Search',
+      execute: async () => {
+        if (!process.env.BRAVE_API_KEY) return [];
+        try {
+          console.log(`[${this.source.name}] Using Brave Search as last resort`);
+          const host = new URL(this.source.url).host;
+          let q = `site:${host}`;
+          if (this.source.name === 'Anthropic Blog') q += ' (news OR blog) (AI OR research)';
+          if (this.source.name === 'DeepMind Research') q += ' (blog OR research)';
+          const results = await braveWebSearch(q, { count: 6, freshness: 'pm', country: 'us' });
+          return (results || []).map((r) => ({
+            title: r.title,
+            content: r.snippet || 'Search result from Brave; open the URL for full content.',
+            url: r.url,
+            metadata: {
+              source: this.source.name,
+              timestamp: new Date().toISOString(),
+              id: `${this.source.name}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+            }
+          }));
+        } catch (e) {
+          console.log(`[Brave Search] Failed for ${this.source.name}: ${e}`);
+          return [];
+        }
+      }
+    });
     
     // Try each strategy in order
     for (const strategy of strategies) {

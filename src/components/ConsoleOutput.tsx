@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface ConsoleOutputProps {
   logs: string[];
@@ -10,12 +10,36 @@ interface ConsoleOutputProps {
 
 export default function ConsoleOutput({ logs, isExpanded, onToggleExpand }: ConsoleOutputProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs]);
+
+  // Collapsed to just header bar
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-4 right-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg w-[200px]">
+        <div
+          className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-[var(--surface-hover)] rounded-lg"
+          onClick={() => setIsMinimized(false)}
+        >
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-xs font-medium text-[var(--foreground)]">Console</span>
+            {logs.length > 0 && (
+              <span className="text-[10px] text-[var(--muted)]">({logs.length})</span>
+            )}
+          </div>
+          <svg className="w-3 h-3 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`fixed bottom-4 right-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg transition-all ${
@@ -28,10 +52,21 @@ export default function ConsoleOutput({ logs, isExpanded, onToggleExpand }: Cons
           <span className="text-xs font-medium text-[var(--foreground)]">Console Output</span>
         </div>
         <div className="flex items-center space-x-1">
+          {/* Minimize to bar */}
+          <button
+            onClick={() => setIsMinimized(true)}
+            className="p-1 hover:bg-[var(--surface-hover)] rounded transition-colors"
+            title="Minimize to bar"
+          >
+            <svg className="w-4 h-4 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {/* Expand/Shrink */}
           <button
             onClick={onToggleExpand}
             className="p-1 hover:bg-[var(--surface-hover)] rounded transition-colors"
-            title={isExpanded ? "Minimize" : "Expand"}
+            title={isExpanded ? "Shrink" : "Expand"}
           >
             <svg className="w-4 h-4 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {isExpanded ? (

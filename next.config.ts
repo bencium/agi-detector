@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Docker/container deployment
+  output: 'standalone',
+
   // Security: Build-time checks
   // Note: Some minor type issues remain but don't affect security
   eslint: {

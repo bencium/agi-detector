@@ -1,46 +1,105 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { query, isDbEnabled } from '@/lib/db';
+
+interface CrawlResult {
+  id: string;
+  url: string;
+  title: string;
+  content: string;
+  timestamp: Date;
+  metadata: Record<string, unknown> | null;
+}
+
+interface AnalysisResult {
+  id: string;
+  crawlId: string;
+  score: number;
+  confidence: number;
+  indicators: string[];
+  severity: string | null;
+  explanation: string | null;
+  timestamp: Date;
+  url: string | null;
+  title: string | null;
+}
 
 export async function GET() {
+  if (!isDbEnabled) {
+    return NextResponse.json({
+      success: true,
+      data: {
+        crawlResults: [],
+        analyses: [],
+        sourceStats: {},
+        latestCrawlTime: null,
+        totalArticles: 0,
+        totalAnalyses: 0
+      }
+    });
+  }
+
   try {
     // Fetch crawl results
-    const crawlResults = await prisma.crawlResult.findMany({
-      orderBy: { timestamp: 'desc' },
-      take: 1000 // Limit to prevent memory issues
-    });
+    const crawlResults = await query<CrawlResult>(`
+      SELECT id, url, title, content, timestamp, metadata
+      FROM "CrawlResult"
+      ORDER BY timestamp DESC
+      LIMIT 1000
+    `);
 
-    // Get source counts - process manually since metadata is JSON
+    // Get source counts from metadata
     const sourceStats: Record<string, number> = {};
     crawlResults.forEach(result => {
       try {
-        const metadata = result.metadata as any;
-        if (metadata?.source) {
-          sourceStats[metadata.source] = (sourceStats[metadata.source] || 0) + 1;
+        const metadata = result.metadata;
+        if (metadata && typeof metadata === 'object' && 'source' in metadata) {
+          const source = metadata.source as string;
+          sourceStats[source] = (sourceStats[source] || 0) + 1;
         }
-      } catch (e) {
-        console.error('Error processing metadata:', e);
+      } catch {
+        // Skip malformed metadata
       }
     });
 
-    // Get all analyses (include crawl for source URL/title)
-    const analyses = await prisma.analysisResult.findMany({
-      orderBy: { timestamp: 'desc' },
-      take: 1000, // Limit to prevent memory issues
-      include: {
-        crawl: {
-          select: { url: true, title: true }
-        }
-      }
-    });
+    // Get analyses with joined crawl data
+    const analyses = await query<AnalysisResult>(`
+      SELECT
+        ar.id,
+        ar."crawlId",
+        ar.score,
+        ar.confidence,
+        ar.indicators,
+        ar.severity,
+        ar.explanation,
+        ar.timestamp,
+        cr.url,
+        cr.title
+      FROM "AnalysisResult" ar
+      LEFT JOIN "CrawlResult" cr ON ar."crawlId" = cr.id
+      ORDER BY ar.timestamp DESC
+      LIMIT 1000
+    `);
 
-    // Get latest crawl time
+    // Transform analyses to match expected format
+    const formattedAnalyses = analyses.map(a => ({
+      id: a.id,
+      crawlId: a.crawlId,
+      score: a.score,
+      confidence: a.confidence,
+      indicators: a.indicators,
+      severity: a.severity,
+      explanation: a.explanation,
+      timestamp: a.timestamp,
+      crawl: a.url ? { url: a.url, title: a.title } : null
+    }));
+
     const latestCrawl = crawlResults.length > 0 ? crawlResults[0] : null;
 
     return NextResponse.json({
       success: true,
       data: {
         crawlResults,
-        analyses,
+        analyses: formattedAnalyses,
         sourceStats,
         latestCrawlTime: latestCrawl?.timestamp || null,
         totalArticles: crawlResults.length,
@@ -49,10 +108,9 @@ export async function GET() {
     });
   } catch (error) {
     console.error('Failed to fetch data:', error);
-    return NextResponse.json({ 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch data',
-      details: error instanceof Error ? error.stack : undefined
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch data'
     }, { status: 500 });
   }
 }

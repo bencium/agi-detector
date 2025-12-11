@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { prisma, isDbEnabled } from '@/lib/prisma';
+import { query, execute, isDbEnabled } from '@/lib/db';
 
-const NEW_STYLE = /\b(\d{4}\.\d{4,5})(v\d+)?\b/; // e.g., 2506.04207 or 2506.04207v1
-const OLD_STYLE = /\b([a-z\-]+(?:\.[A-Za-z\-]+)?\/\d{7})(v\d+)?\b/i; // e.g., cs.AI/9901001
+const NEW_STYLE = /\b(\d{4}\.\d{4,5})(v\d+)?\b/;
+const OLD_STYLE = /\b([a-z\-]+(?:\.[A-Za-z\-]+)?\/\d{7})(v\d+)?\b/i;
 
 function extractArxivId(text?: string | null): string | null {
   if (!text) return null;
@@ -20,14 +20,21 @@ function isValidArxivId(id: string): boolean {
   return NEW_STYLE.test(id) || OLD_STYLE.test(id);
 }
 
-function deriveArxivUrl(row: { url: string | null; title?: string | null; content?: string | null; metadata?: any }): string | null {
+interface CrawlRow {
+  id: string;
+  url: string;
+  title: string;
+  content: string;
+  metadata: Record<string, unknown> | null;
+}
+
+function deriveArxivUrl(row: CrawlRow): string | null {
   try {
     const meta = row.metadata || {};
     const src = String(meta?.source || '').toLowerCase();
     const isArxiv = src.includes('arxiv') || (row.url || '').includes('arxiv.org');
     if (!isArxiv) return null;
 
-    // 1) From existing URL
     const fromUrl = (() => {
       if (!row.url) return null;
       const m = row.url.match(/arxiv\.org\/abs\/([^\s?#]+)/i);
@@ -35,13 +42,12 @@ function deriveArxivUrl(row: { url: string | null; title?: string | null; conten
       return null;
     })();
 
-    // 2) From metadata.id/title/content patterns
     const candidates = [
-      meta?.id,
+      (meta as Record<string, string>)?.id,
       row.title,
       row.content,
-      meta?.title,
-      meta?.description,
+      (meta as Record<string, string>)?.title,
+      (meta as Record<string, string>)?.description
     ].map(extractArxivId).filter(Boolean) as string[];
 
     const id = fromUrl || candidates[0] || null;
@@ -58,39 +64,42 @@ export async function POST() {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'DB disabled' }, { status: 503 });
   }
+
   try {
-    let cursor: string | null = null;
     const batch = 300;
     let scanned = 0;
     let updated = 0;
+    let offset = 0;
 
     while (true) {
-      const items = await prisma.crawlResult.findMany({
-        orderBy: { id: 'asc' },
-        take: batch,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        select: { id: true, url: true, title: true, content: true, metadata: true },
-      });
+      const items = await query<CrawlRow>(`
+        SELECT id, url, title, content, metadata
+        FROM "CrawlResult"
+        ORDER BY id ASC
+        LIMIT $1 OFFSET $2
+      `, [batch, offset]);
+
       if (items.length === 0) break;
       scanned += items.length;
 
-      const ops = items.map((it) => {
-        const nextUrl = deriveArxivUrl(it as any);
-        if (!nextUrl) return null;
-        return prisma.crawlResult.update({ where: { id: it.id }, data: { url: nextUrl } });
-      }).filter(Boolean) as any[];
-
-      if (ops.length > 0) {
-        const res = await prisma.$transaction(ops);
-        updated += res.length;
+      for (const it of items) {
+        const nextUrl = deriveArxivUrl(it);
+        if (nextUrl) {
+          await execute(
+            'UPDATE "CrawlResult" SET url = $1 WHERE id = $2',
+            [nextUrl, it.id]
+          );
+          updated++;
+        }
       }
 
-      cursor = items[items.length - 1].id;
+      offset += batch;
       if (items.length < batch) break;
     }
 
     return NextResponse.json({ success: true, scanned, updated });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error?.message || 'Fix arXiv URLs failed' }, { status: 500 });
+  } catch (error) {
+    const err = error as Error;
+    return NextResponse.json({ success: false, error: err?.message || 'Fix arXiv URLs failed' }, { status: 500 });
   }
 }

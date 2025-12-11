@@ -65,9 +65,10 @@ A sophisticated early-warning system that monitors the AI landscape for genuine 
 ### Tech Stack
 - **Frontend**: Next.js 14 + React 19 + TypeScript
 - **Styling**: TailwindCSS with custom Anthropic-inspired theme
-- **Database**: PostgreSQL (via Neon) + Prisma ORM
-- **AI Integration**: OpenAI GPT-4.1
-- **Web Crawling**: 
+- **Database**: PostgreSQL + pgvector (raw SQL via `pg` library)
+- **Vector Search**: pgvector extension for semantic similarity (512-dim embeddings)
+- **AI Integration**: OpenAI GPT-4o-mini
+- **Web Crawling**:
   - Advanced multi-strategy crawler with RSS feed support
   - Playwright browser automation for JavaScript-heavy sites
   - User agent rotation and stealth techniques
@@ -75,11 +76,14 @@ A sophisticated early-warning system that monitors the AI landscape for genuine 
 - **Data Visualization**: Custom SVG trend charts
 
 ### Database Schema
-```prisma
-- CrawlResult: Stores crawled articles
-- AnalysisResult: Enhanced with severity, evidence quality, and cross-references
+```sql
+-- Core tables (auto-created on first API call)
+- CrawlResult: Stores crawled articles (id, url, title, content, metadata)
+- AnalysisResult: AI analysis with scores, severity, embeddings (pgvector)
 - HistoricalData: Tracks metrics over time
 - TrendAnalysis: Aggregated trend data for visualization
+- AnalysisJob: Progress tracking for batch operations
+- ARCProgress: ARC-AGI benchmark snapshots
 ```
 
 ## 🛠️ Installation
@@ -106,11 +110,10 @@ Before starting, you'll need to set up free accounts for:
      - Create a database: `createdb agi_detector`
      - Connection string: `postgresql://localhost/agi_detector`
 
-3. **Firecrawl API Key** (Optional but recommended)
-   - Sign up at [firecrawl.dev](https://www.firecrawl.dev)
-   - Get your API key from dashboard
-   - Free tier: 500 credits/month (enough for DeepMind & Anthropic crawling)
-   - Without this, DeepMind and Anthropic sources won't work
+3. **Firecrawl API Key** (Optional - legacy)
+   - No longer required for Anthropic/DeepMind (Playwright handles these now)
+   - Sign up at [firecrawl.dev](https://www.firecrawl.dev) if you want additional fallback
+   - Free tier: 500 credits/month
 
 ### Installation Steps
 
@@ -167,10 +170,13 @@ BRAVE_API_KEY=bs-...
 - If provided, `BRAVE_API_KEY` enables Brave site search fallback
 - The format must be exactly as shown (no extra quotes around keys)
 
-4. **Set up the database**:
+4. **Set up the database** (if using local PostgreSQL):
 ```bash
-npx prisma generate
-npx prisma db push
+# Enable pgvector extension (required for semantic search)
+psql -d your_database -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# Tables are auto-created on first API call
+# For Neon/Supabase, pgvector is pre-installed
 ```
 
 5. **Run the development server**:
@@ -190,10 +196,10 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 2. **Cost Optimization**:
    - The system uses GPT-4.1-mini which is very cost-efficient
    - Each analysis costs ~$0.001 (1000 analyses ≈ $1)
-   - Firecrawl free tier is sufficient for daily monitoring
+   - No paid API required for crawling (Playwright handles blocked sources)
 
 3. **Troubleshooting**:
-   - If sources show 0 articles, check your Firecrawl API key
+   - If sources show 0 articles, ensure Playwright browsers are installed (`npx playwright install chromium`)
    - Database connection errors: Verify your DATABASE_URL format
    - OpenAI errors: Ensure your API key has credits
 
@@ -211,7 +217,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 - ✅ Request limits - 1MB body size, 10MB response size, 30s timeouts
 - ✅ Security headers - X-Frame-Options, XSS protection, content-type sniffing protection
 - ✅ Browser security - Playwright runs without dangerous --disable-web-security flags
-- ✅ SQL injection protection - Prisma ORM with parameterized queries
+- ✅ SQL injection protection - parameterized queries via pg library
 - ✅ Regular dependency updates - automated security patch management
 
 **Best Practices for Users:**
@@ -224,12 +230,12 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 **For Security Issues:**
 See [SECURITY.md](SECURITY.md) for our security policy and how to report vulnerabilities responsibly.
 
-### 🗄️ Database (Prisma) Notes
+### 🗄️ Database Notes
 - If `DATABASE_URL` is not set, the server runs in a no-DB mode. API routes like `/api/data` and `/api/trends` return empty arrays so you can exercise the UI and crawling/analysis flows without persistence.
 - To enable persistence locally:
   1) Set `DATABASE_URL` in `.env.local`.
-  2) Run `npx prisma generate`.
-  3) Run `npx prisma db push` (or `npx prisma migrate dev`).
+  2) Tables are auto-created on first API call.
+  3) For pgvector support, run: `psql -d your_db -c "CREATE EXTENSION IF NOT EXISTS vector;"`
 
 ## 🕷️ Web Crawling Implementation
 
@@ -254,13 +260,7 @@ The AGI Detector uses a sophisticated multi-strategy crawling system to bypass b
    - Honors a short TTL cache and minimal rate-limiting
    - Requires `BRAVE_API_KEY`
 
-4. **Firecrawl API**: For heavily protected sources
-   - Professional web scraping service
-   - Handles JavaScript rendering
-   - Bypasses most anti-bot measures
-   - Limited to 50 requests/day (cached for 24h)
-
-5. **Browser Automation**: Last resort using Playwright
+4. **Browser Automation**: Primary for JavaScript-heavy sites (Playwright)
    - Full JavaScript rendering
    - Stealth plugins to avoid detection
    - Random viewport sizes
@@ -268,9 +268,9 @@ The AGI Detector uses a sophisticated multi-strategy crawling system to bypass b
 
 #### Working Sources:
 - ✅ **OpenAI Blog**: ~500 articles via RSS feed
-- ✅ **DeepMind Research**: ~100 articles via advanced crawling
-- ✅ **Anthropic Blog**: 3+ articles via Firecrawl API
-- ✅ **Microsoft AI Blog**: ~30 articles via RSS feed  
+- ✅ **DeepMind Research**: ~90 articles via Playwright browser automation
+- ✅ **Anthropic Blog**: ~16 articles via Playwright (React SPA)
+- ✅ **Microsoft AI Blog**: ~30 articles via RSS feed
 - ✅ **TechCrunch AI**: ~60 articles via RSS feed
 - ✅ **VentureBeat AI**: ~90 articles via RSS feed
 - ✅ **arXiv AI**: ~200 articles via HTML parsing
@@ -282,6 +282,32 @@ The crawler includes:
 - **User Agent Pool**: Rotates through real browser user agents
 - **Error Handling**: Automatic retries with exponential backoff
 - **Resource Cleanup**: Proper browser instance management
+
+## 📱 UI Guide
+
+### Overview Tab
+- **ARC Progress Indicator**: Shows current ARC-AGI-2 benchmark progress toward AGI
+- **Monitoring Status**: Groups sources by type (ARC, Research Labs, News)
+- **Action Buttons**: Start/Stop monitoring, Run Manual Scan with progress bar
+- **Progress Bar**: Shows % complete, ETA, current article during analysis
+
+### Findings Tab
+- Lists all crawled articles from monitored sources
+- Shows title, content excerpt, source, timestamp, external link
+
+### Analysis Tab
+- AI-analyzed articles with AGI scores (0-100%)
+- Color-coded severity badges (critical/high/medium/low/none)
+- Detected indicators, cross-references, explanations
+- Validation button for second-opinion analysis
+
+### Trends Tab
+- Historical charts (daily/weekly/monthly periods)
+- Average and max score lines
+- Critical alert indicators (pulsing red dots)
+- Risk assessment metrics
+
+---
 
 ## 📊 Usage Guide
 
@@ -317,12 +343,18 @@ The crawler includes:
 
 - `POST /api/crawl` - Trigger manual crawl of all sources
 - `POST /api/analyze-all` - Analyze all unprocessed articles (processes in batches of 50)
+- `GET /api/analyze-status?jobId=X` - Poll analysis job progress (%, ETA, current article)
 - `GET /api/data` - Get all crawled articles and analyses with source statistics
 - `GET /api/trends?period={daily|weekly|monthly}` - Fetch trend data
 - `POST /api/validate` - Validate specific analysis results (only increases scores)
 - `POST /api/test-crawler` - Test individual crawler sources
- - `POST /api/backfill-historical` - One-off backfill of HistoricalData from existing analyses
- - `POST /api/backfill-severities` - One-off recompute of severities from scores (escalate-only)
+- `GET /api/arc` - Fetch ARC-AGI benchmark data (official, Kaggle, GitHub)
+- `POST /api/arc` - Force refresh ARC data
+- `GET /api/similar?id=X` - Find semantically similar articles (pgvector)
+- `GET /api/backfill-embeddings` - Check embedding status
+- `POST /api/backfill-embeddings` - Generate missing embeddings
+- `POST /api/backfill-historical` - One-off backfill of HistoricalData from existing analyses
+- `POST /api/backfill-severities` - One-off recompute of severities from scores (escalate-only)
 - `GET /api/db-health` - Quick DB connectivity and counts (crawl/analysis/trends)
   ```json
   {
@@ -404,6 +436,35 @@ Reading the last log line
 Notes
 - The crawl step (`POST /api/crawl`) can be long, but it now runs independent of analysis timeouts. The UI triggers analyze-all after crawling; with the settings above, analysis should no longer block indefinitely.
 
+## 🔍 Vector Search (pgvector)
+
+The system uses pgvector for semantic similarity search:
+
+**Status:**
+- ✅ pgvector extension enabled
+- ✅ 512-dimensional embeddings via `text-embedding-3-small`
+- ✅ HNSW index for fast similarity queries
+- ⚠️ Embeddings generated on-demand (not auto during analysis)
+
+**Usage:**
+```bash
+# Check embedding status
+curl http://localhost:3000/api/backfill-embeddings
+
+# Generate missing embeddings (~$0.02 for 1000 articles)
+curl -X POST http://localhost:3000/api/backfill-embeddings
+
+# Find similar articles
+curl http://localhost:3000/api/similar?id=<analysis-uuid>
+```
+
+**Future Plans:**
+- Auto-generate embeddings during analysis
+- Semantic search UI
+- Anomaly detection (find outliers)
+
+---
+
 ## ⚠️ Important Notes
 
 ### Security
@@ -474,9 +535,67 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - All monitored AI research labs for their transparency
 - Contributors and testers
 
-## 🆕 Recent Updates (October 2025)
+## 🆕 Recent Updates
 
-### v2.3 — Validation UX, Trends, and Risk Link
+### v2.5 — AGI Progress Indicator & Crawler Fixes (December 2025)
+
+**AGI Progress Indicator:**
+- Fixed 0% display bug - now correctly shows 20.8% progress toward AGI
+- Based on ARC-AGI-2 benchmark: 24% SOTA vs 4% baseline, normalized to human performance
+- Added real-time progress calculation from official ARC leaderboard data
+
+**Crawler Improvements:**
+- Replaced Firecrawl dependency with native Playwright for Anthropic/DeepMind
+- Updated CSS selectors for Anthropic's React SPA (FeaturedGrid, PublicationList)
+- Fixed empty linkSelector handling in browser automation
+- DeepMind now fetching 90+ articles via Playwright
+
+**ARC Challenge Categories:**
+- Removed hardcoded fake percentages (3%, 2%, 1%)
+- Now displays "N/A - Not publicly available" for categories without official data
+- Categories based on actual ARC-AGI-2 benchmark structure
+
+**Bug Fixes:**
+- Fixed database UUID generation (`gen_random_uuid()`)
+- Fixed TypeScript interface for AnalysisResult timestamps
+- Fixed data path for ARC progress API response
+
+**Known Limitation:**
+- Historical articles (like OpenAI's 2019 "Emergent Tool Use") may score high because they describe genuinely impressive capabilities
+- Future: Add temporal weighting to reduce scores for older breakthroughs
+
+### v2.4 — Raw SQL Migration & Progress Tracking (December 2025)
+
+**Architecture:**
+- Migrated from Prisma ORM to raw PostgreSQL with `pg` library
+- Added pgvector extension for semantic search (512-dim embeddings)
+- Reduced bundle size by ~5MB (removed Prisma client)
+
+**Progress Indicator:**
+- Real-time progress bar during batch analysis
+- ETA prediction based on average batch time
+- Shows current article, success/failure counts
+- New `/api/analyze-status` polling endpoint
+
+**Improved AGI Detection:**
+- More conservative scoring (reduced false positives)
+- Added explicit disqualifiers for narrow domain work
+- New skeptical guidance: "Could a PhD student replicate in 6 months?"
+- Better severity mapping
+
+**ARC-AGI Monitoring:**
+- GitHub repository monitoring (arcprize/ARC-AGI-2)
+- Tracks discussions, releases, commits
+- Kaggle and Official leaderboard integration (partial)
+- AGI Progress Indicator component
+
+**New Endpoints:**
+- `GET /api/analyze-status?jobId=X` - Poll job progress
+- `GET /api/arc` - Fetch ARC benchmark data
+- `GET /api/similar?id=X` - Find semantically similar articles
+- `GET /api/backfill-embeddings` - Check/generate embeddings
+
+### v2.3 — Validation UX, Trends, and Risk Link (October 2025)
 - Validation enhancements:
   - Persisted “last validated” metadata on each analysis (timestamp + before/after deltas).
   - Validate button shows for medium+ by default; configurable via `NEXT_PUBLIC_VALIDATION_MIN_SEVERITY` and `NEXT_PUBLIC_VALIDATION_ALWAYS`.
@@ -508,9 +627,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Prisma client wrapper simplified in `src/lib/prisma.ts`
 
 ### v2.1 — Complete Source Coverage & Enhanced UI
-- All 7 sources working: DeepMind and Anthropic via Firecrawl API
+- All 7 sources working: DeepMind and Anthropic via browser automation
 - Enhanced console output and processing indicators
-- Validation system improvements (second‑opinion flow; scores never decrease)
+- Validation system improvements (second-opinion flow; scores never decrease)
 
 ### v2.0 — Enhanced AGI Detection
 - Upgraded to GPT‑4.1‑mini (historical)
@@ -518,11 +637,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Historical tracking + trend visualization
 
 ### Advanced Web Crawling
-- **Multi-Strategy Approach**: RSS feeds → HTTP requests → Firecrawl API → Browser automation
+- **Multi-Strategy Approach**: RSS feeds → HTTP requests → Playwright browser automation
 - **Anti-Blocking**: User agent rotation, stealth techniques, rate limiting
 - **All 7 Sources Working**: Successfully crawling 1000+ articles total
-- **Firecrawl Integration**: Professional scraping for heavily protected sites (DeepMind, Anthropic)
-- **Smart Caching**: 24-hour cache for API-limited services
+- **Playwright Integration**: Browser automation for JavaScript-heavy sites (DeepMind, Anthropic)
+- **No Paid APIs Required**: All crawling done via open-source tools
 
 ---
 

@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { prisma, isDbEnabled } from '@/lib/prisma';
+import { query, insert, isDbEnabled } from '@/lib/db';
+
+interface AnalysisRow {
+  id: string;
+  score: number;
+  confidence: number;
+  indicators: string[];
+}
 
 export async function POST() {
   if (!isDbEnabled) {
@@ -9,47 +16,54 @@ export async function POST() {
   try {
     const batchSize = 200;
     let total = 0;
-    let cursor: string | null = null;
+    let offset = 0;
 
-    // Process in pages
-    // Find analyses that do not have any HistoricalData rows yet
-    // Simpler approach: backfill for all analyses (idempotent enough if we de-dupe per analysis)
     while (true) {
-      const analyses: any[] = await prisma.analysisResult.findMany({
-        orderBy: { timestamp: 'desc' },
-        take: batchSize,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        select: { id: true, score: true, confidence: true, indicators: true },
-      });
+      const analyses = await query<AnalysisRow>(`
+        SELECT id, score, confidence, indicators
+        FROM "AnalysisResult"
+        ORDER BY timestamp DESC
+        LIMIT $1 OFFSET $2
+      `, [batchSize, offset]);
+
       if (analyses.length === 0) break;
 
-      // Check which analysis already has historical data
+      // Check which analyses already have historical data
       const ids = analyses.map(a => a.id);
-      const existing = await prisma.historicalData.findMany({
-        where: { analysisId: { in: ids } },
-        select: { analysisId: true },
-      });
+      const existing = await query<{ analysisId: string }>(`
+        SELECT DISTINCT "analysisId"
+        FROM "HistoricalData"
+        WHERE "analysisId" = ANY($1)
+      `, [ids]);
+
       const existingSet = new Set(existing.map(e => e.analysisId));
 
-      const rows: { analysisId: string; metric: string; value: number }[] = [];
       for (const a of analyses) {
-        if (existingSet.has(a.id)) continue; // skip if already backfilled
-        rows.push({ analysisId: a.id, metric: 'score', value: a.score });
-        rows.push({ analysisId: a.id, metric: 'confidence', value: a.confidence });
-        rows.push({ analysisId: a.id, metric: 'indicator_count', value: a.indicators?.length || 0 });
-      }
-      if (rows.length > 0) {
-        await prisma.historicalData.createMany({ data: rows });
-        total += rows.length;
+        if (existingSet.has(a.id)) continue;
+
+        // Insert historical data for this analysis
+        await insert(
+          `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+          [a.id, 'score', a.score]
+        );
+        await insert(
+          `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+          [a.id, 'confidence', a.confidence]
+        );
+        await insert(
+          `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+          [a.id, 'indicator_count', a.indicators?.length || 0]
+        );
+        total += 3;
       }
 
-      cursor = analyses[analyses.length - 1].id;
+      offset += batchSize;
       if (analyses.length < batchSize) break;
     }
 
     return NextResponse.json({ success: true, backfilledRows: total });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error?.message || 'Backfill failed' }, { status: 500 });
+  } catch (error) {
+    const err = error as Error;
+    return NextResponse.json({ success: false, error: err?.message || 'Backfill failed' }, { status: 500 });
   }
 }
-

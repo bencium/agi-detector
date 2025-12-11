@@ -28,19 +28,21 @@ export const SOURCES = {
     },
     {
       name: 'DeepMind Research',
-      url: 'https://deepmind.google/research/',
-      selector: '.research-card',
-      titleSelector: 'h3',
-      contentSelector: 'p',
+      url: 'https://deepmind.google/discover/blog/',
+      selector: 'article.card-blog',
+      titleSelector: 'h3.card__title',
+      contentSelector: '.meta',
       linkSelector: 'a',
     },
     {
       name: 'Anthropic Blog',
       url: 'https://www.anthropic.com/news',
-      selector: '.news-item',
-      titleSelector: 'h2, h3',
-      contentSelector: 'p',
-      linkSelector: 'a',
+      // Match both FeaturedGrid cards and PublicationList items
+      selector: 'a[href*="/news/"][class*="FeaturedGrid"], a[href*="/news/"][class*="PublicationList"]',
+      titleSelector: 'h2, .headline-4',
+      contentSelector: 'p.body-3, p',
+      linkSelector: '', // Link IS the selector (handled in advanced-crawler)
+      isAnthropicNews: true, // Special handling for React SPA
     },
     {
       name: 'Microsoft AI Blog',
@@ -84,6 +86,16 @@ export const SOURCES = {
         url: (url: string) => url.startsWith('http') ? url : `https://arxiv.org${url}`,
       }
     },
+    {
+      name: 'Anthropic Research',
+      url: 'https://www.anthropic.com/research',
+      // Match FeaturedGrid and PublicationList items linking to /research/
+      selector: 'a[href*="/research/"][class*="FeaturedGrid"], a[href*="/research/"][class*="PublicationList"]',
+      titleSelector: 'h2, h3, .headline-4',
+      contentSelector: 'p.body-3, p',
+      linkSelector: '', // Link IS the selector (handled in advanced-crawler)
+      isAnthropicResearch: true, // Special handling for Anthropic's React SPA research page
+    },
   ],
 };
 
@@ -106,6 +118,8 @@ type Source = {
   contentSelector: string;
   linkSelector: string;
   isSpecial?: boolean;
+  isAnthropicNews?: boolean; // Special handling for Anthropic's React SPA (news/blog)
+  isAnthropicResearch?: boolean; // Special handling for Anthropic's React SPA (research papers)
   transform?: {
     title?: (text: string) => string;
     content?: (text: string) => string;

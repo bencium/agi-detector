@@ -6,6 +6,11 @@ import ConsoleOutput from '@/components/ConsoleOutput';
 import { useConsoleCapture } from '@/hooks/useConsoleCapture';
 import { safeJsonParse } from '@/lib/utils/safeJson';
 import { Skeleton, SkeletonStatCard, SkeletonSourceCard, SkeletonChart } from '@/components/Skeleton';
+import AGIProgressIndicator, { AGIProgressData } from '@/components/AGIProgressIndicator';
+import ARCChallengeCategories from '@/components/ARCChallengeCategories';
+import MonitoringStatus, { SourceStatus } from '@/components/MonitoringStatus';
+import SemanticSearch from '@/components/SemanticSearch';
+import AnomalyDetection from '@/components/AnomalyDetection';
 
 interface CrawlResult {
   id: string;
@@ -30,6 +35,7 @@ interface AnalysisResult {
   crossReferences?: string[];
   crawl?: { url?: string; title?: string };
   validatedAt?: string;
+  timestamp?: string | Date;
   lastValidation?: {
     prevScore?: number;
     newScore?: number;
@@ -39,6 +45,17 @@ interface AnalysisResult {
     recommendation?: string;
     timestamp?: string;
   };
+}
+
+interface AnalyzeAllResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    summary?: {
+      totalAnalyzed?: number;
+    };
+  };
+  logs?: string[];
 }
 
 const shouldRunDailyCrawl = (lastRunTime: string | null): boolean => {
@@ -58,7 +75,7 @@ export default function Home(): React.ReactElement {
   const [lastCrawlTime, setLastCrawlTime] = useState<string | null>(null);
   const [nextScheduledCrawl, setNextScheduledCrawl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [validatingId, setValidatingId] = useState<string | null>(null);
@@ -66,6 +83,18 @@ export default function Home(): React.ReactElement {
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [totalAnalyzed, setTotalAnalyzed] = useState(0);
+  const [jobProgress, setJobProgress] = useState<{
+    status: string;
+    progress: number;
+    processedArticles: number;
+    totalArticles: number;
+    currentArticle: string | null;
+    eta: string | null;
+    successfulAnalyses: number;
+    failedAnalyses: number;
+  } | null>(null);
+  const [arcProgressData, setArcProgressData] = useState<AGIProgressData | null>(null);
+  const [monitoringSourceStatus, setMonitoringSourceStatus] = useState<SourceStatus[]>([]);
   const [validationMeta, setValidationMeta] = useState<Record<string, {
     prevScore: number;
     newScore: number;
@@ -107,73 +136,99 @@ export default function Home(): React.ReactElement {
   const analyzeData = async () => {
     setIsLoading(true);
     setTotalAnalyzed(0);
+    setJobProgress(null);
     addLog('Starting AI analysis of all unanalyzed articles...');
-    
-    let totalAnalyzedCount = 0;
-    let batchNumber = 0;
-    const maxBatches = 20; // Safety limit to prevent infinite loops
-    
-    try {
-      while (batchNumber < maxBatches) {
-        addLog(`Processing batch ${batchNumber + 1}...`);
-        const response = await fetch('/api/analyze-all', { method: 'POST' });
-        
-        // Check if response is ok before parsing JSON
-        if (!response.ok) {
-          throw new Error(`Analysis failed: ${response.status} ${response.statusText}`);
-        }
-        
-        const text = await response.text();
-        if (!text) {
-          addLog('No more articles to analyze');
-          break;
-        }
-        
-        // Safe JSON parsing with fallback
-        const data = safeJsonParse(text, {
-          success: false,
-          error: 'Failed to parse server response'
-        });
-        
-        if (data.success && data.data?.summary) {
-          const batchAnalyzed = data.data.summary.totalAnalyzed || 0;
-          totalAnalyzedCount += batchAnalyzed;
-          setTotalAnalyzed(totalAnalyzedCount);
-          
-          // Display detailed logs from the backend
-          if (data.logs && Array.isArray(data.logs)) {
-            data.logs.forEach((log: string) => addLog(log));
+
+    // Start the analysis job
+    const analyzePromise = fetch('/api/analyze-all', { method: 'POST' });
+
+    // Poll for progress while the job runs
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResponse = await fetch('/api/analyze-status');
+        const statusData = await statusResponse.json();
+
+        if (statusData.success && statusData.data) {
+          const job = statusData.data;
+          setJobProgress({
+            status: job.status,
+            progress: job.progress,
+            processedArticles: job.processedArticles,
+            totalArticles: job.totalArticles,
+            currentArticle: job.currentArticle,
+            eta: job.eta,
+            successfulAnalyses: job.successfulAnalyses,
+            failedAnalyses: job.failedAnalyses
+          });
+
+          // Update total analyzed count for backward compatibility
+          setTotalAnalyzed(job.successfulAnalyses || 0);
+
+          // Log progress updates
+          if (job.status === 'running' && job.currentArticle) {
+            addLog(`[${job.progress}%] Analyzing: ${job.currentArticle.slice(0, 60)}...`);
           }
-          
-          if (batchAnalyzed === 0) {
-            addLog('All articles have been analyzed');
-            break;
+
+          // Stop polling if job is done
+          if (job.status === 'completed' || job.status === 'failed') {
+            clearInterval(pollInterval);
           }
-          
-          addLog(`✅ Batch ${batchNumber + 1} complete: ${batchAnalyzed} articles analyzed (Total: ${totalAnalyzedCount})`);
-          
-          // Small delay between batches to avoid overwhelming the API
-          if (batchAnalyzed === 50) {
-            addLog('⏳ Waiting 2 seconds before next batch...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        } else {
-          break;
         }
-        
-        batchNumber++;
+      } catch (e) {
+        // Silently ignore polling errors
       }
-      
+    }, 3000); // Poll every 3 seconds
+
+    try {
+      const response = await analyzePromise;
+      clearInterval(pollInterval);
+
+      if (!response.ok) {
+        throw new Error(`Analysis failed: ${response.status} ${response.statusText}`);
+      }
+
+      const text = await response.text();
+      const data = safeJsonParse<AnalyzeAllResponse & { jobId?: string }>(text, {
+        success: false,
+        error: 'Failed to parse server response'
+      });
+
+      if (data.success && data.data?.summary) {
+        const totalAnalyzedCount = data.data.summary.totalAnalyzed || 0;
+        setTotalAnalyzed(totalAnalyzedCount);
+
+        if (data.logs && Array.isArray(data.logs)) {
+          // Only show summary logs to avoid flooding
+          const summaryLogs = data.logs.filter((log: string) =>
+            log.includes('Batch completed') || log.includes('Found') || log.includes('Created job')
+          );
+          summaryLogs.forEach((log: string) => addLog(log));
+        }
+
+        addLog(`✅ Analysis complete! ${totalAnalyzedCount} articles analyzed`);
+      }
+
+      // Check if there are more articles to analyze
+      const unanalyzedCount = crawlResults.length - analyses.length - (data.data?.summary?.totalAnalyzed || 0);
+      if (unanalyzedCount > 0 && data.data?.summary?.totalAnalyzed === 50) {
+        addLog(`⏳ ${unanalyzedCount} articles remaining. Starting next batch...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await analyzeData(); // Recursive call for next batch
+        return;
+      }
+
       // Reload all data to get the new analyses
       await loadExistingData();
-      addLog(`✅ Analysis complete! Total analyzed: ${totalAnalyzedCount} articles`);
-      
+
     } catch (error) {
+      clearInterval(pollInterval);
       console.error('Analysis failed:', error);
       addLog(`❌ Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setError(error instanceof Error ? error.message : 'Analysis failed');
     }
+
     setIsLoading(false);
+    setJobProgress(null);
     setTotalAnalyzed(0);
   };
 
@@ -268,7 +323,35 @@ export default function Home(): React.ReactElement {
           setLastCrawlTime(data.data.latestCrawlTime);
         }
         addLog(`Loaded ${data.data.totalArticles} articles and ${data.data.totalAnalyses} analyses`);
-        
+
+        // Initialize monitoring source status based on sourceStats
+        const sourceStatusList: SourceStatus[] = [
+          { name: 'openai', displayName: 'OpenAI', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['OpenAI Blog'] || 0 },
+          { name: 'deepmind', displayName: 'DeepMind', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['DeepMind Research'] || 0 },
+          { name: 'anthropic', displayName: 'Anthropic', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['Anthropic Blog'] || 0 },
+          { name: 'microsoft', displayName: 'Microsoft AI', type: 'corporate', status: 'active', articleCount: data.data.sourceStats['Microsoft AI Blog'] || 0 },
+          { name: 'arxiv', displayName: 'arXiv AI', type: 'academic', status: 'active', articleCount: data.data.sourceStats['arXiv AI'] || 0 },
+          { name: 'techcrunch', displayName: 'TechCrunch', type: 'news', status: 'active', articleCount: data.data.sourceStats['TechCrunch AI'] || 0 },
+          { name: 'venturebeat', displayName: 'VentureBeat', type: 'news', status: 'active', articleCount: data.data.sourceStats['VentureBeat AI'] || 0 },
+          { name: 'arc_official', displayName: 'ARC Prize Leaderboard', type: 'benchmark', status: 'active', lastCheck: new Date().toISOString() },
+          { name: 'arc_kaggle', displayName: 'Kaggle ARC-AGI-2', type: 'kaggle', status: 'active', lastCheck: new Date().toISOString() },
+          { name: 'arc_github', displayName: 'ARC-AGI-2 GitHub', type: 'github', status: 'active', lastCheck: new Date().toISOString() },
+        ];
+        setMonitoringSourceStatus(sourceStatusList);
+
+        // Set default ARC progress data, then fetch real data
+        setArcProgressData({
+          topScore: 0.04, // Current SOTA (o3-preview-low)
+          humanBaseline: 1.0,
+          gapToHuman: 0.96,
+          status: 'baseline',
+          description: 'Baseline - current AI capabilities on novel reasoning',
+          lastUpdated: new Date().toISOString()
+        });
+
+        // Fetch ARC progress data in background (don't block UI)
+        fetchARCProgress();
+
         // Automatically analyze unanalyzed articles
         const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
         if (unanalyzedCount > 0) {
@@ -299,6 +382,43 @@ export default function Home(): React.ReactElement {
       }
     } catch (error) {
       console.error('Failed to fetch trends:', error);
+    }
+  };
+
+  // Fetch ARC progress data
+  const fetchARCProgress = async () => {
+    try {
+      addLog('Fetching ARC-AGI progress data...');
+      const response = await fetch('/api/arc');
+      const data = await response.json();
+      if (data.success && data.data) {
+        const progress = data.data.progress || data.data;
+        // topScore can be at data.data.topScore or progress.topScore
+        const topScore = data.data.topScore || progress.topScore || 0.04;
+        const gapToHuman = data.data.gapToHuman || (1.0 - topScore);
+        setArcProgressData({
+          topScore: topScore,
+          humanBaseline: 1.0,
+          gapToHuman: gapToHuman,
+          status: progress.status || data.data.status || 'baseline',
+          description: progress.description || 'Baseline - current AI capabilities',
+          lastUpdated: data.data.timestamp || new Date().toISOString()
+        });
+        addLog(`ARC Progress: ${(topScore * 100).toFixed(1)}% (${progress.status || data.data.status || 'baseline'})`);
+
+        // Update monitoring status for ARC sources
+        if (data.data.official || data.data.kaggle || data.data.github) {
+          setMonitoringSourceStatus(prev => prev.map(s => {
+            if (s.name === 'arc_official') return { ...s, status: data.data.official ? 'active' : 'error', lastCheck: new Date().toISOString() };
+            if (s.name === 'arc_kaggle') return { ...s, status: data.data.kaggle?.entriesCount > 0 ? 'active' : 'error', lastCheck: new Date().toISOString() };
+            if (s.name === 'arc_github') return { ...s, status: data.data.github ? 'active' : 'error', lastCheck: new Date().toISOString() };
+            return s;
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch ARC progress:', error);
+      addLog('ARC data fetch failed - using defaults');
     }
   };
 
@@ -450,7 +570,7 @@ export default function Home(): React.ReactElement {
       <div className="bg-[var(--surface)] border-b border-[var(--border)] sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-8">
-            {(['overview', 'findings', 'analysis', 'trends'] as const).map((tab) => (
+            {(['overview', 'findings', 'analysis', 'trends', 'anomalies'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -551,20 +671,52 @@ export default function Home(): React.ReactElement {
                   onClick={startCrawling}
                   disabled={isLoading}
                   className={`px-6 py-3 rounded-lg font-medium transition-all ${
-                    isLoading 
-                      ? 'bg-[var(--accent)] text-white processing-button scale-105' 
+                    isLoading
+                      ? 'bg-[var(--accent)] text-white processing-button scale-105'
                       : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
                   } disabled:cursor-not-allowed`}
                 >
                   {isLoading ? (
                     <span className="flex items-center space-x-3">
                       <span className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
-                      <span className="text-lg font-semibold">Processing... Please Wait</span>
+                      <span className="text-lg font-semibold">
+                        {jobProgress ? `${jobProgress.progress}% - ${jobProgress.eta || 'calculating...'}` : 'Starting...'}
+                      </span>
                     </span>
                   ) : (
                     'Run Manual Scan'
                   )}
                 </button>
+
+              {/* Progress Bar */}
+              {isLoading && jobProgress && (
+                <div className="w-full mt-4 space-y-2">
+                  <div className="flex justify-between text-sm text-[var(--muted)]">
+                    <span>{jobProgress.processedArticles} / {jobProgress.totalArticles} articles</span>
+                    <span>{jobProgress.eta ? `ETA: ${jobProgress.eta}` : 'Calculating...'}</span>
+                  </div>
+                  <div className="w-full h-3 bg-[var(--surface-hover)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--accent)] transition-all duration-500 ease-out"
+                      style={{ width: `${jobProgress.progress}%` }}
+                    />
+                  </div>
+                  {jobProgress.currentArticle && (
+                    <p className="text-xs text-[var(--muted)] truncate">
+                      Analyzing: {jobProgress.currentArticle}
+                    </p>
+                  )}
+                  <div className="flex justify-between text-xs text-[var(--muted)]">
+                    <span className="text-green-600">{jobProgress.successfulAnalyses} successful</span>
+                    {jobProgress.failedAnalyses > 0 && (
+                      <span className="text-red-600">{jobProgress.failedAnalyses} failed</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--muted)] opacity-60 mt-1">
+                    If stuck, refresh the page - progress is saved to database
+                  </p>
+                </div>
+              )}
               </div>
 
               {/* Status Info */}
@@ -582,84 +734,21 @@ export default function Home(): React.ReactElement {
               </div>
             </div>
 
-            {/* Monitored Sources */}
-            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-[var(--foreground)]">Monitored Sources</h3>
-                  {!isInitialLoading && (
-                    <p className="text-xs mt-1 flex items-center space-x-1">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent-cyan)' }} />
-                      <span style={{ color: 'var(--accent-cyan)' }}>All systems operational</span>
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={loadExistingData}
-                  className="text-sm transition-colors hover:scale-110"
-                  style={{ color: 'var(--accent-cyan)' }}
-                  title="Refresh counts"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {isInitialLoading ? (
-                  <>
-                    {[...Array(7)].map((_, i) => (
-                      <SkeletonSourceCard key={i} />
-                    ))}
-                  </>
-                ) : (
-                  [
-                    { name: 'OpenAI Blog', displayName: 'OpenAI', type: 'Research Lab', url: 'openai.com' },
-                    { name: 'DeepMind Research', displayName: 'DeepMind', type: 'Research Lab', url: 'deepmind.com' },
-                    { name: 'Anthropic Blog', displayName: 'Anthropic', type: 'Research Lab', url: 'anthropic.com' },
-                    { name: 'Microsoft AI Blog', displayName: 'Microsoft AI', type: 'Corporate Lab', url: 'microsoft.com/ai' },
-                    { name: 'arXiv AI', displayName: 'arXiv AI', type: 'Academic', url: 'arxiv.org' },
-                    { name: 'TechCrunch AI', displayName: 'TechCrunch', type: 'News', url: 'techcrunch.com' },
-                    { name: 'VentureBeat AI', displayName: 'VentureBeat', type: 'News', url: 'venturebeat.com' },
-                  ].map((source) => {
-                    const count = sourceStats[source.name] || 0;
-                    const isWorking = count > 0 || ['OpenAI Blog', 'Microsoft AI Blog', 'TechCrunch AI', 'VentureBeat AI', 'arXiv AI', 'DeepMind Research', 'Anthropic Blog'].includes(source.name);
-                    const statusColor = isWorking ? 'bg-green-500' : 'bg-gray-400';
-                    const borderColor = isWorking ? 'border-green-500' : 'border-gray-400';
-                    const statusText = count > 0 ? 'Working' : isWorking ? 'Active' : 'Limited';
+            {/* AGI Progress Indicator */}
+            <AGIProgressIndicator
+              data={arcProgressData}
+              isLoading={isInitialLoading}
+            />
 
-                    return (
-                      <div
-                        key={source.name}
-                        className={`bg-[var(--surface-hover)] rounded-lg p-4 border-l-4 transition-all hover:shadow-lg hover:scale-[1.02] ${borderColor}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <div className="font-medium text-[var(--foreground)] mb-0.5">{source.displayName}</div>
-                            <div className="text-xs text-[var(--muted)]">{source.type}</div>
-                          </div>
-                          {count > 0 && (
-                            <span className="text-xs font-semibold px-2 py-1 rounded-full"
-                              style={{ backgroundColor: 'var(--accent-cyan)', color: 'white' }}>
-                              {count}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-[var(--border)]">
-                          <div className="flex items-center space-x-1.5">
-                            <span className={`w-2 h-2 rounded-full ${statusColor}`} />
-                            <span className="text-xs font-medium text-[var(--muted)]">{statusText}</span>
-                          </div>
-                          <div className="text-xs text-[var(--muted)]">
-                            {count > 0 && `${count} ${count === 1 ? 'article' : 'articles'}`}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
+            {/* ARC Challenge Categories */}
+            <ARCChallengeCategories isLoading={isInitialLoading} />
+
+            {/* Monitoring Status Dashboard */}
+            <MonitoringStatus
+              sources={monitoringSourceStatus}
+              isLoading={isInitialLoading}
+              onRefresh={loadExistingData}
+            />
 
             {/* Key Indicators */}
             <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
@@ -742,6 +831,14 @@ export default function Home(): React.ReactElement {
         {/* Analysis Tab */}
         {activeTab === 'analysis' && (
           <div className="space-y-4 animate-fade-in">
+            {/* Semantic Search */}
+            <SemanticSearch
+              onResultClick={(result) => {
+                const el = document.getElementById(`analysis-card-${result.id}`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
+
             {analyses.length === 0 ? (
               <div className="bg-[var(--surface)] rounded-xl p-12 border border-[var(--border)] text-center">
                 <div className="text-5xl mb-4">📊</div>
@@ -755,7 +852,10 @@ export default function Home(): React.ReactElement {
                   const ra = rank[(a.severity || 'none').toLowerCase()] ?? 0;
                   const rb = rank[(b.severity || 'none').toLowerCase()] ?? 0;
                   if (rb !== ra) return rb - ra;
-                  return (b.score || 0) - (a.score || 0);
+                  // Secondary sort: newest first within same severity
+                  const ta = new Date(a.timestamp || 0).getTime();
+                  const tb = new Date(b.timestamp || 0).getTime();
+                  return tb - ta;
                 })
                 .map((analysis) => (
                 <div id={`analysis-card-${analysis.id}`} key={analysis.id} className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
@@ -978,8 +1078,15 @@ export default function Home(): React.ReactElement {
             </div>
           </div>
         )}
+
+        {/* Anomalies Tab */}
+        {activeTab === 'anomalies' && (
+          <div className="animate-fade-in">
+            <AnomalyDetection />
+          </div>
+        )}
       </main>
-      
+
       {/* Console Output */}
       <ConsoleOutput 
         logs={logs} 
