@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query, isDbEnabled } from '@/lib/db';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 import { getLastCrawlRunAt } from '@/lib/state/appState';
+import { enforceCriticalEvidenceGate, type Severity } from '@/lib/severity';
 
 interface CrawlResult {
   id: string;
@@ -86,20 +87,31 @@ export async function GET() {
     `);
 
     // Transform analyses to match expected format
-    const formattedAnalyses = analyses.map(a => ({
-      id: a.id,
-      crawlId: a.crawlId,
-      score: a.score,
-      modelScore: a.modelScore || undefined,
-      heuristicScore: a.heuristicScore || undefined,
-      scoreBreakdown: a.scoreBreakdown || undefined,
-      confidence: a.confidence,
-      indicators: a.indicators,
-      severity: a.severity,
-      explanation: a.explanation,
-      timestamp: a.timestamp,
-      crawl: a.url ? { url: a.url, title: a.title, metadata: a.metadata } : null
-    }));
+    const formattedAnalyses = analyses.map(a => {
+      const metadata = a.metadata as Record<string, any> | null;
+      const claims = metadata?.evidence?.claims as Array<{ benchmark?: string; delta?: number }> | undefined;
+      const hasDelta = Array.isArray(claims)
+        ? claims.some((claim) => Boolean(claim.benchmark) && typeof claim.delta === 'number')
+        : false;
+      const severity = a.severity
+        ? enforceCriticalEvidenceGate(a.severity as Severity, hasDelta)
+        : a.severity;
+
+      return {
+        id: a.id,
+        crawlId: a.crawlId,
+        score: a.score,
+        modelScore: a.modelScore || undefined,
+        heuristicScore: a.heuristicScore || undefined,
+        scoreBreakdown: a.scoreBreakdown || undefined,
+        confidence: a.confidence,
+        indicators: a.indicators,
+        severity,
+        explanation: a.explanation,
+        timestamp: a.timestamp,
+        crawl: a.url ? { url: a.url, title: a.title, metadata: a.metadata } : null
+      };
+    });
 
     const latestCrawl = crawlResults.length > 0 ? crawlResults[0] : null;
     const lastCrawlRunAt = await getLastCrawlRunAt();

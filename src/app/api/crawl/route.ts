@@ -74,11 +74,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[Crawler API] Saved ${savedResults.length} new articles (${crawledResults.length - savedResults.length} duplicates skipped)`);
+    const totalCrawled = crawledResults.length;
+    const savedCount = savedResults.length;
+    const duplicates = totalCrawled - savedCount;
+    console.log(`[Crawler API] Saved ${savedCount} new articles (${duplicates} duplicates skipped)`);
 
     return NextResponse.json({
       success: true,
       data: savedResults,
+      meta: {
+        totalCrawled,
+        savedCount,
+        duplicates
+      },
       message: `Successfully crawled and saved ${savedResults.length} articles`
     });
   } catch (error) {

@@ -35,6 +35,11 @@ interface CriticalAlert {
   metadata: Record<string, unknown> | null;
 }
 
+interface AnalysisMetaRow {
+  count: string;
+  latest: Date | null;
+}
+
 export async function GET(request: Request) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'Database not configured' }, { status: 503 });
@@ -138,6 +143,10 @@ export async function GET(request: Request) {
       LIMIT 5
     `);
 
+    const analysisMeta = await query<AnalysisMetaRow>(
+      `SELECT COUNT(*)::text as count, MAX("timestamp") as latest FROM "AnalysisResult"`
+    );
+
     // Calculate statistics
     const stats = {
       averageScore: trends.length > 0
@@ -150,6 +159,8 @@ export async function GET(request: Request) {
       criticalAlertsCount: trends.reduce((sum, t) => sum + t.criticalAlerts, 0),
       trend: calculateTrend(trends)
     };
+    const latestAnalysisTimestamp = analysisMeta[0]?.latest || null;
+    const totalAnalyses = Number(analysisMeta[0]?.count || 0);
 
     return NextResponse.json({
       success: true,
@@ -168,7 +179,12 @@ export async function GET(request: Request) {
           ...a,
           crawl: { title: a.title, url: a.url, metadata: a.metadata }
         })),
-        stats
+        stats,
+        meta: {
+          latestAnalysisTimestamp,
+          totalAnalyses,
+          windowDays
+        }
       }
     });
   } catch (error) {

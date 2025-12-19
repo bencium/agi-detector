@@ -181,6 +181,10 @@ export default function Home(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [trendStats, setTrendStats] = useState<any | null>(null);
+  const [trendMeta, setTrendMeta] = useState<any | null>(null);
+  const [correlations, setCorrelations] = useState<any[]>([]);
+  const [correlationsWindowDays] = useState<number>(30);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
@@ -294,6 +298,8 @@ export default function Home(): React.ReactElement {
             if (job.status === 'completed' || job.status === 'failed') {
               clearInterval(pollInterval);
               await loadExistingData();
+              await fetchTrends();
+              await fetchCorrelations();
               addLog(job.status === 'completed' ? '✅ Analysis complete!' : '❌ Analysis failed.');
               setIsLoading(false);
               setJobProgress(null);
@@ -321,7 +327,24 @@ export default function Home(): React.ReactElement {
     addLog('🚀 Starting crawl of all AI sources...');
     
     try {
-      addLog('Fetching from: OpenAI, DeepMind, Anthropic, Microsoft AI, arXiv, TechCrunch, VentureBeat');
+      const sourceList = [
+        'OpenAI',
+        'DeepMind',
+        'Anthropic',
+        'Microsoft AI',
+        'BAAI',
+        'ByteDance Seed',
+        'Tencent AI Lab',
+        'Shanghai AI Lab',
+        'Qwen Releases',
+        'Huawei Noah',
+        'ModelScope',
+        'arXiv',
+        'ChinaXiv',
+        'TechCrunch',
+        'VentureBeat'
+      ].join(', ');
+      addLog(`Fetching from: ${sourceList}`);
       const response = await apiFetch('/api/crawl', { 
         method: 'POST',
         headers: {
@@ -347,7 +370,10 @@ export default function Home(): React.ReactElement {
         // Reload all data to get updated counts
         setTimeout(() => loadExistingData(), 1000);
         
-        addLog(`✅ Crawl complete! Found ${data.data.length} articles`);
+        const totalCrawled = data?.meta?.totalCrawled ?? data.data.length;
+        const savedCount = data?.meta?.savedCount ?? data.data.length;
+        const duplicates = data?.meta?.duplicates ?? Math.max(0, totalCrawled - savedCount);
+        addLog(`✅ Crawl complete! Saved ${savedCount} new · Crawled ${totalCrawled} total · Duplicates ${duplicates}`);
         addLog('Starting AGI analysis...');
         await analyzeData();
       } else {
@@ -456,6 +482,8 @@ export default function Home(): React.ReactElement {
 
         // Fetch ARC progress data in background (don't block UI)
         fetchARCProgress();
+        // Fetch correlation findings in background
+        fetchCorrelations();
 
         // Automatically analyze unanalyzed articles
         const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
@@ -495,6 +523,8 @@ export default function Home(): React.ReactElement {
       const data = await response.json();
       if (data.success) {
         setTrendData(data.data.trends);
+        setTrendStats(data.data.stats || null);
+        setTrendMeta(data.data.meta || null);
         updateCache({ trends: { [trendPeriod]: data.data.trends } });
         addLog(`Loaded ${data.data.trends.length} trend data points`);
       }
@@ -506,6 +536,18 @@ export default function Home(): React.ReactElement {
         setTrendData(cachedTrends);
         addLog(`Loaded ${cachedTrends.length} cached trend data points`);
       }
+    }
+  };
+
+  const fetchCorrelations = async () => {
+    try {
+      const response = await apiFetch(`/api/correlations?days=${correlationsWindowDays}&limit=10`);
+      const data = await response.json();
+      if (data.success) {
+        setCorrelations(data.data.findings || []);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch correlations:', error);
     }
   };
 
@@ -885,6 +927,74 @@ export default function Home(): React.ReactElement {
               onRefresh={loadExistingData}
             />
 
+            {/* Interesting Correlations */}
+            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-[var(--foreground)]">Interesting Correlations</h3>
+                  <p className="text-xs text-[var(--muted)] mt-1">
+                    Co-occurring indicators with benchmark deltas across sources (last {correlationsWindowDays} days)
+                  </p>
+                </div>
+                <button
+                  onClick={fetchCorrelations}
+                  className="text-xs px-3 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-hover)]"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {correlations.length === 0 ? (
+                <div className="text-sm text-[var(--muted)] text-center py-6">
+                  No cross-source correlations yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {correlations.map((item, idx) => (
+                    <div key={item.id || idx} className="p-4 rounded-lg bg-[var(--surface-hover)] border border-[var(--border)]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-[var(--foreground)]">{item.indicator}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--surface)] text-[var(--foreground)] border border-[var(--border)]">
+                          {item.benchmark}{item.metric ? ` · ${item.metric}` : ''}
+                        </span>
+                        <span className="text-xs text-[var(--muted)]">
+                          Δ avg {typeof item.avgDelta === 'number' ? item.avgDelta.toFixed(2) : '—'}
+                        </span>
+                        <span className="text-xs text-[var(--muted)]">
+                          Δ max {typeof item.maxDelta === 'number' ? item.maxDelta.toFixed(2) : '—'}
+                        </span>
+                        <span className="text-xs text-[var(--muted)]">
+                          {item.sourceCount} sources · {item.analysisCount} analyses
+                        </span>
+                      </div>
+                      {Array.isArray(item.sources) && item.sources.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {item.sources.slice(0, 6).map((source: string) => (
+                            <span key={source} className="text-xs px-2 py-0.5 rounded-full bg-white/70 text-[var(--muted)] border border-[var(--border)]">
+                              {source}
+                            </span>
+                          ))}
+                          {item.sources.length > 6 && (
+                            <span className="text-xs text-[var(--muted)]">+{item.sources.length - 6} more</span>
+                          )}
+                        </div>
+                      )}
+                      {Array.isArray(item.urls) && item.urls.length > 0 && (
+                        <div className="mt-2 text-xs text-[var(--muted)]">
+                          Sources: {item.urls.slice(0, 2).map((url: string) => (
+                            <span key={url} className="mr-2">
+                              {url}
+                            </span>
+                          ))}
+                          {item.urls.length > 2 && <span>…</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -1172,7 +1282,16 @@ export default function Home(): React.ReactElement {
           <div className="space-y-6 animate-fade-in">
             {/* Period Selector */}
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-[var(--foreground)]">Historical Trends</h2>
+              <div>
+                <h2 className="text-xl font-bold text-[var(--foreground)]">Historical Trends</h2>
+                <div className="text-xs text-[var(--muted)] mt-1">
+                  {trendMeta?.latestAnalysisTimestamp
+                    ? `Last updated: ${new Date(trendMeta.latestAnalysisTimestamp).toLocaleString()}`
+                    : 'Last updated: —'}
+                  {trendMeta?.windowDays ? ` · Window: last ${trendMeta.windowDays} days` : ''}
+                  {typeof trendMeta?.totalAnalyses === 'number' ? ` · Total analyses: ${trendMeta.totalAnalyses}` : ''}
+                </div>
+              </div>
               <div className="flex space-x-2">
                 {(['daily', 'weekly', 'monthly'] as const).map((period) => (
                   <button
@@ -1192,6 +1311,39 @@ export default function Home(): React.ReactElement {
 
             {/* Trend Chart */}
             <TrendChart data={trendData} period={trendPeriod} />
+
+            {/* Trend Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-[var(--surface)] rounded-xl p-4 border border-[var(--border)]">
+                <div className="text-xs text-[var(--muted)]">Average Score</div>
+                <div className="text-lg font-semibold text-[var(--foreground)]">
+                  {(() => {
+                    const avg = trendStats?.averageScore ??
+                      (trendData.length > 0
+                        ? trendData.reduce((sum, t) => sum + (t.avgScore || 0), 0) / trendData.length
+                        : 0);
+                    return `${(avg * 100).toFixed(1)}%`;
+                  })()}
+                </div>
+              </div>
+              <div className="bg-[var(--surface)] rounded-xl p-4 border border-[var(--border)]">
+                <div className="text-xs text-[var(--muted)]">Max Score</div>
+                <div className="text-lg font-semibold text-[var(--danger)]">
+                  {(() => {
+                    const max = trendStats?.maxScoreRecorded ??
+                      (trendData.length > 0 ? Math.max(...trendData.map(t => t.maxScore || 0)) : 0);
+                    return `${(max * 100).toFixed(1)}%`;
+                  })()}
+                </div>
+              </div>
+              <div className="bg-[var(--surface)] rounded-xl p-4 border border-[var(--border)]">
+                <div className="text-xs text-[var(--muted)]">Critical Alerts</div>
+                <div className="text-lg font-semibold text-[var(--foreground)]">
+                  {trendStats?.criticalAlertsCount ??
+                    trendData.reduce((sum, t) => sum + (t.criticalAlerts || 0), 0)}
+                </div>
+              </div>
+            </div>
 
             {/* Risk Assessment Summary */}
             <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">

@@ -51,6 +51,30 @@ CREATE TABLE IF NOT EXISTS "AppState" (
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Correlation findings (co-occurrence across sources)
+CREATE TABLE IF NOT EXISTS "CorrelationFinding" (
+    id TEXT NOT NULL DEFAULT gen_random_uuid(),
+    "windowDays" INTEGER NOT NULL,
+    indicator TEXT NOT NULL,
+    benchmark TEXT NOT NULL,
+    metric TEXT,
+    "avgDelta" DOUBLE PRECISION,
+    "maxDelta" DOUBLE PRECISION,
+    "analysisCount" INTEGER NOT NULL,
+    "sourceCount" INTEGER NOT NULL,
+    sources TEXT[] NOT NULL DEFAULT '{}',
+    "analysisIds" TEXT[] NOT NULL DEFAULT '{}',
+    urls TEXT[] NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CorrelationFinding_pkey" PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "CorrelationFinding_window_indicator_benchmark_metric_key"
+  ON "CorrelationFinding"("windowDays", indicator, benchmark, metric);
+CREATE INDEX IF NOT EXISTS "CorrelationFinding_updatedAt_idx"
+  ON "CorrelationFinding"("updatedAt");
+
 -- Evidence claims table
 CREATE TABLE IF NOT EXISTS "EvidenceClaim" (
     id TEXT NOT NULL DEFAULT gen_random_uuid(),

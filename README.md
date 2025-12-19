@@ -14,12 +14,15 @@ An advanced monitoring system designed to detect early signs of Artificial Gener
 - **Smarter anomalies**: Source-grouped clustering + minimum AGI score threshold reduce noise.
 - **CJK normalization**: Chinese text gets tokenization support and optional translation for consistent indicators.
 - **Playwright retries**: Gated sources use Playwright with retries for better coverage.
+- **Correlation MVP**: Cross-source co-occurrence of indicators + benchmark deltas surfaced on Overview.
 
 ## 🧭 Roadmap (Next)
 - Improve selectors and stability for China lab pages (BAAI, ByteDance Seed, Tencent AI Lab, Shanghai AI Lab).
 - Add ChinaXiv parsing refinements (author/date extraction + canonicalization).
 - Expand bilingual evidence extraction + translation for mixed Chinese/English releases.
 - Add learning loop (ruvector or agentdb): feedback-driven retrain or reranker to adapt thresholds over time.
+- Correlations v2: embedding-based clustering across sources + time-windowed co-movement detection.
+- Correlations v3: LLM synthesis over correlation clusters + anomaly alignment for context.
 
 ## 🎯 Project Vision
 
