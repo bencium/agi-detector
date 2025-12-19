@@ -124,20 +124,12 @@ const truncate = (text: string, limit = 220) => {
 const buildItemLine = (item: SourceSnippet, index: number) => {
   const parts: string[] = [];
   parts.push(`source: ${item.source}`);
-  parts.push(`title: ${truncate(item.title, 180)}`);
+  parts.push(`title: ${truncate(item.title, 160)}`);
   parts.push(`url: ${item.url}`);
-  parts.push(`date: ${item.timestamp}`);
-  if (item.indicators && item.indicators.length > 0) {
-    parts.push(`indicators: ${item.indicators.slice(0, 6).join(', ')}`);
-  }
-  if (item.severity) {
-    parts.push(`severity: ${item.severity}`);
-  }
-  if (typeof item.score === 'number') {
-    parts.push(`score: ${item.score.toFixed(2)}`);
-  }
   if (item.claim) {
-    parts.push(`claim: ${truncate(item.claim, 260)}`);
+    parts.push(`claim: ${truncate(item.claim, 220)}`);
+  } else if (item.snippets && item.snippets.length > 0) {
+    parts.push(`snippet: ${truncate(item.snippets[0] || '', 200)}`);
   }
   if (item.benchmark || item.metric || item.delta != null || item.value != null) {
     const details = [
@@ -147,9 +139,6 @@ const buildItemLine = (item: SourceSnippet, index: number) => {
       item.value != null ? `value=${item.value}${item.unit || ''}` : null
     ].filter(Boolean).join(', ');
     if (details) parts.push(details);
-  }
-  if (item.snippets && item.snippets.length > 0) {
-    parts.push(`snippets: ${truncate(item.snippets.join(' | '), 240)}`);
   }
   return `${index + 1}. ${parts.join(' | ')}`;
 };
@@ -240,10 +229,11 @@ export async function ensureInsightSchema(): Promise<void> {
 export async function refreshInsights(windowDays: number, limit = 5): Promise<InsightFinding[]> {
   await ensureInsightSchema();
 
-  const sampleLimit = clamp(Number(process.env.INSIGHTS_SAMPLE_LIMIT || 240), 60, 600);
-  const chunkSize = clamp(Number(process.env.INSIGHTS_CHUNK_SIZE || 50), 20, 120);
+  const sampleLimit = clamp(Number(process.env.INSIGHTS_SAMPLE_LIMIT || 80), 30, 300);
+  const chunkSize = clamp(Number(process.env.INSIGHTS_CHUNK_SIZE || 30), 15, 80);
   const maxResults = clamp(Number(process.env.INSIGHTS_MAX_RESULTS || limit), 1, 10);
-  const temperature = clamp(Number(process.env.INSIGHTS_TEMPERATURE || 0.7), 0, 1);
+  const temperature = clamp(Number(process.env.INSIGHTS_TEMPERATURE || 0.6), 0, 1);
+  const maxChunks = clamp(Number(process.env.INSIGHTS_MAX_CHUNKS || 1), 1, 4);
   const model = process.env.INSIGHTS_MODEL || process.env.OPENAI_MODEL || 'gpt-5-mini';
 
   let items: SourceSnippet[] = [];
@@ -356,19 +346,30 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
   }
 
   const usable = items.filter((item) => item.claim || (item.snippets && item.snippets.length > 0) || (item.indicators && item.indicators.length > 0));
+  const bySource = new Map<string, SourceSnippet[]>();
+  for (const item of usable) {
+    const key = item.source || 'Unknown';
+    if (!bySource.has(key)) bySource.set(key, []);
+    bySource.get(key)?.push(item);
+  }
+  const cappedPerSource = 2;
+  const sourceBalanced = Array.from(bySource.values()).flatMap(list => list.slice(0, cappedPerSource));
 
-  if (usable.length === 0) {
+  if (sourceBalanced.length === 0) {
     return [];
   }
 
-  const shuffled = shuffle(usable);
-  const chunks = chunkArray(shuffled, chunkSize);
+  const shuffled = shuffle(sourceBalanced);
+  const chunks = chunkArray(shuffled, chunkSize).slice(0, maxChunks);
   const candidates: InsightDraft[] = [];
 
   for (const chunk of chunks) {
     try {
       const chunkInsights = await runInsightPass(chunk, model, temperature);
       candidates.push(...chunkInsights);
+      if (candidates.length >= maxResults) {
+        break;
+      }
     } catch (error) {
       console.warn('[Insights] Chunk insight pass failed:', error);
     }
