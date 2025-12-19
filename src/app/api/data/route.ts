@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query, isDbEnabled } from '@/lib/db';
+import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 
 interface CrawlResult {
   id: string;
@@ -14,6 +15,9 @@ interface AnalysisResult {
   id: string;
   crawlId: string;
   score: number;
+  modelScore?: number | null;
+  heuristicScore?: number | null;
+  scoreBreakdown?: Record<string, unknown> | null;
   confidence: number;
   indicators: string[];
   severity: string | null;
@@ -21,24 +25,20 @@ interface AnalysisResult {
   timestamp: Date;
   url: string | null;
   title: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 export async function GET() {
   if (!isDbEnabled) {
     return NextResponse.json({
-      success: true,
-      data: {
-        crawlResults: [],
-        analyses: [],
-        sourceStats: {},
-        latestCrawlTime: null,
-        totalArticles: 0,
-        totalAnalyses: 0
-      }
-    });
+      success: false,
+      error: 'Database not configured',
+      dbEnabled: false
+    }, { status: 503 });
   }
 
   try {
+    await ensureAnalysisScoreSchema();
     // Fetch crawl results
     const crawlResults = await query<CrawlResult>(`
       SELECT id, url, title, content, timestamp, metadata
@@ -67,13 +67,17 @@ export async function GET() {
         ar.id,
         ar."crawlId",
         ar.score,
+        ar."modelScore",
+        ar."heuristicScore",
+        ar."scoreBreakdown",
         ar.confidence,
         ar.indicators,
         ar.severity,
         ar.explanation,
         ar.timestamp,
         cr.url,
-        cr.title
+        cr.title,
+        cr.metadata
       FROM "AnalysisResult" ar
       LEFT JOIN "CrawlResult" cr ON ar."crawlId" = cr.id
       ORDER BY ar.timestamp DESC
@@ -85,18 +89,22 @@ export async function GET() {
       id: a.id,
       crawlId: a.crawlId,
       score: a.score,
+      modelScore: a.modelScore || undefined,
+      heuristicScore: a.heuristicScore || undefined,
+      scoreBreakdown: a.scoreBreakdown || undefined,
       confidence: a.confidence,
       indicators: a.indicators,
       severity: a.severity,
       explanation: a.explanation,
       timestamp: a.timestamp,
-      crawl: a.url ? { url: a.url, title: a.title } : null
+      crawl: a.url ? { url: a.url, title: a.title, metadata: a.metadata } : null
     }));
 
     const latestCrawl = crawlResults.length > 0 ? crawlResults[0] : null;
 
     return NextResponse.json({
       success: true,
+      dbEnabled: true,
       data: {
         crawlResults,
         analyses: formattedAnalyses,

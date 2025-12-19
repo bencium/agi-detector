@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { apiFetch } from '@/lib/client/api';
 
 interface Anomaly {
   id: string;
@@ -23,13 +24,14 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [sortBy, setSortBy] = useState<'distance' | 'score'>('distance');
 
   const detectAnomalies = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const res = await fetch('/api/anomalies?limit=15');
+      const res = await apiFetch('/api/anomalies?limit=15');
       const data = await res.json();
 
       if (data.success) {
@@ -89,6 +91,31 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
     return 'text-green-600';
   };
 
+  const sortedDistances = useMemo(
+    () => anomalies.map(a => a.avgDistance).sort((a, b) => a - b),
+    [anomalies]
+  );
+
+  const getDistancePercentile = (distance: number) => {
+    if (sortedDistances.length <= 1) return 100;
+    let count = 0;
+    for (const value of sortedDistances) {
+      if (value <= distance) count += 1;
+    }
+    const percentile = Math.round(((count - 1) / (sortedDistances.length - 1)) * 100);
+    return Math.max(0, Math.min(100, percentile));
+  };
+
+  const sortedAnomalies = useMemo(() => {
+    const list = [...anomalies];
+    if (sortBy === 'score') {
+      list.sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else {
+      list.sort((a, b) => (b.avgDistance || 0) - (a.avgDistance || 0));
+    }
+    return list;
+  }, [anomalies, sortBy]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -130,6 +157,10 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
               <strong className="text-[var(--foreground)]">How it works:</strong> Uses pgvector to compute the
               centroid of all article embeddings, then finds articles with the highest distance from that center.
               Higher distance = more unusual semantic content.
+              <div className="mt-1">
+                Distance uses cosine distance (pgvector &lt;=&gt;). Percentile is relative to the current list
+                (P100 = most unusual).
+              </div>
             </div>
           </div>
         </div>
@@ -162,12 +193,34 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="text-sm text-[var(--muted)] mb-2">
-                Found {anomalies.length} semantic outliers, ranked by deviation from center
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+                <div className="text-sm text-[var(--muted)]">
+                  Found {sortedAnomalies.length} semantic outliers, ranked by {sortBy === 'distance' ? 'distance' : 'AGI score'}
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-[var(--muted)]">Sort by</span>
+                  <div className="flex overflow-hidden rounded-full border border-[var(--border)]">
+                    <button
+                      type="button"
+                      onClick={() => setSortBy('distance')}
+                      className={`px-3 py-1 ${sortBy === 'distance' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] text-[var(--muted)]'}`}
+                    >
+                      Distance
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSortBy('score')}
+                      className={`px-3 py-1 ${sortBy === 'score' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] text-[var(--muted)]'}`}
+                    >
+                      AGI Score
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {anomalies.map((anomaly, index) => {
+              {sortedAnomalies.map((anomaly, index) => {
                 const level = getAnomalyLevel(anomaly.avgDistance);
+                const percentile = getDistancePercentile(anomaly.avgDistance);
                 return (
                   <div
                     key={anomaly.id}
@@ -207,6 +260,11 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
                           {/* Distance Score */}
                           <span className="text-xs text-[var(--muted)]">
                             Distance: <span className="font-mono font-medium text-[var(--foreground)]">{anomaly.avgDistance.toFixed(3)}</span>
+                          </span>
+
+                          {/* Percentile */}
+                          <span className="text-xs text-[var(--muted)]">
+                            Percentile: <span className="font-mono font-medium text-[var(--foreground)]">P{percentile}</span>
                           </span>
 
                           {/* AGI Score */}

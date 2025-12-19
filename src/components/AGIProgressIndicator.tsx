@@ -118,6 +118,11 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
             </span>
           </div>
         </div>
+        {progressData.lastUpdated && (
+          <div className="text-[11px] text-[var(--muted)] text-right mt-2">
+            As of {new Date(progressData.lastUpdated).toLocaleString()}
+          </div>
+        )}
       </div>
 
       {/* Stats Grid */}
@@ -167,12 +172,6 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
         </div>
       </div>
 
-      {/* Last Updated */}
-      {progressData.lastUpdated && (
-        <div className="text-xs text-[var(--muted)] text-right mt-3">
-          Last updated: {new Date(progressData.lastUpdated).toLocaleString()}
-        </div>
-      )}
     </div>
   );
 };

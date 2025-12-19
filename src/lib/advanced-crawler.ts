@@ -5,7 +5,8 @@ import UserAgent from 'user-agents';
 import { parseStringPromise } from 'xml2js';
 import { RateLimiter as Limiter } from 'limiter';
 import { braveWebSearch } from './brave-search';
-import { isUrlSafe } from './security/urlValidator';
+import { isUrlSafeWithDns } from './security/urlValidator';
+import { buildCrawlMetadata } from './evidence';
 
 // Sources that block simple HTTP requests - use Playwright as primary
 const BLOCKED_SOURCES = [
@@ -24,6 +25,23 @@ interface CrawledArticle {
     source: string;
     timestamp: string;
     id: string;
+    fetchedAt?: string;
+    canonicalUrl?: string;
+    contentHash?: string;
+    evidence?: {
+      snippets: string[];
+      claims: Array<{
+        claim: string;
+        evidence: string;
+        tags: string[];
+        numbers: number[];
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
   };
 }
 
@@ -66,7 +84,7 @@ const getHeaders = () => ({
 async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArticle[]> {
   try {
     // Security: Validate URL before fetching
-    const validation = isUrlSafe(url);
+    const validation = await isUrlSafeWithDns(url);
     if (!validation.safe) {
       console.warn(`[RSS] Blocked unsafe URL: ${url} - ${validation.reason}`);
       return [];
@@ -86,16 +104,23 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
     const parsed = await parseStringPromise(response.data);
     const items = parsed.rss?.channel?.[0]?.item || parsed.feed?.entry || [];
     
-    return items.map((item: any) => ({
-      title: item.title?.[0]?._ || item.title?.[0] || '',
-      content: item.description?.[0] || item.summary?.[0] || item.content?.[0] || '',
-      url: item.link?.[0]?.$ ?.href || item.link?.[0] || item.guid?.[0] || '',
-      metadata: {
+    return items.map((item: any) => {
+      const title = item.title?.[0]?._ || item.title?.[0] || '';
+      const content = item.description?.[0] || item.summary?.[0] || item.content?.[0] || '';
+      const url = item.link?.[0]?.$ ?.href || item.link?.[0] || item.guid?.[0] || '';
+      const publishedAt = item.pubDate?.[0] || item.updated?.[0];
+      const id = item.guid?.[0] || item.id?.[0] || `${sourceName}-${Date.now()}`;
+      const metadata = buildCrawlMetadata({
         source: sourceName,
-        timestamp: item.pubDate?.[0] || item.updated?.[0] || new Date().toISOString(),
-        id: item.guid?.[0] || item.id?.[0] || `${sourceName}-${Date.now()}`
-      }
-    })).filter((article: { title: string; content: string; url: string; metadata: object }) => article.title && article.content);
+        url,
+        content,
+        title,
+        publishedAt,
+        id
+      });
+
+      return { title, content, url, metadata };
+    }).filter((article: { title: string; content: string; url: string; metadata: object }) => article.title && article.content);
   } catch (error) {
     console.log(`[RSS] Failed to parse RSS feed: ${error}`);
     return [];
@@ -130,7 +155,7 @@ async function getBrowser(): Promise<Browser> {
 
 async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArticle[]> {
   // Security: Validate URL before crawling
-  const validation = isUrlSafe(url);
+  const validation = await isUrlSafeWithDns(url);
   if (!validation.safe) {
     console.warn(`[Browser] Blocked unsafe URL: ${url} - ${validation.reason}`);
     return [];
@@ -210,11 +235,12 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
     
     return articles.map(article => ({
       ...article,
-      metadata: {
+      metadata: buildCrawlMetadata({
         source: selectors.name,
-        timestamp: new Date().toISOString(),
-        id: `${selectors.name}-${Date.now()}`
-      }
+        url: article.url,
+        content: article.content,
+        title: article.title
+      })
     }));
   } catch (error) {
     console.error(`[Browser] Error crawling ${url}:`, error);
@@ -271,6 +297,11 @@ export class AdvancedCrawler {
   
   async crawl(): Promise<CrawledArticle[]> {
     const isBlockedSource = BLOCKED_SOURCES.includes(this.source.name);
+    const validation = await isUrlSafeWithDns(this.source.url);
+    if (!validation.safe) {
+      console.warn(`[${this.source.name}] Blocked unsafe URL: ${this.source.url} - ${validation.reason}`);
+      return [];
+    }
 
     // Build strategy list based on source type
     const strategies: CrawlStrategy[] = [];
@@ -341,11 +372,12 @@ export class AdvancedCrawler {
                   title,
                   content,
                   url,
-                  metadata: {
+                  metadata: buildCrawlMetadata({
                     source: this.source.name,
-                    timestamp: new Date().toISOString(),
-                    id: `${this.source.name}-${Date.now()}`
-                  }
+                    url,
+                    content,
+                    title
+                  })
                 });
               }
             });

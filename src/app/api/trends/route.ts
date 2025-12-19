@@ -7,11 +7,10 @@ const trendsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30)
 });
 
-interface TrendRow {
-  ts: Date;
-  avg_score: number;
-  max_score: number;
-  critical: number;
+interface AnalysisTrendRow {
+  timestamp: Date;
+  score: number;
+  severity: string | null;
 }
 
 interface HistoricalRow {
@@ -57,80 +56,51 @@ export async function GET(request: Request) {
     }
 
     const { period, limit } = validatedQuery.data;
-    const granularity = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'day';
     const windowDays = period === 'monthly' ? 365 : period === 'weekly' ? 180 : 30;
 
     let trends: Array<{ timestamp: Date; avgScore: number; maxScore: number; criticalAlerts: number }> = [];
 
     try {
-      // Aggregate from HistoricalData
-      const rows = await query<TrendRow>(`
+      // Per-analysis trend points within the selected window
+      const rows = await query<AnalysisTrendRow>(`
         SELECT
-          date_trunc('${granularity}', hd."timestamp") AS ts,
-          AVG(hd."value") AS avg_score,
-          MAX(hd."value") AS max_score,
-          SUM(CASE WHEN ar."severity" = 'critical' THEN 1 ELSE 0 END) AS critical
-        FROM "HistoricalData" hd
-        JOIN "AnalysisResult" ar ON ar."id" = hd."analysisId"
-        WHERE hd."metric" = 'score'
-          AND hd."timestamp" >= NOW() - INTERVAL '${windowDays} days'
-        GROUP BY ts
-        ORDER BY ts DESC
+          ar."timestamp",
+          ar."score",
+          ar."severity"
+        FROM "AnalysisResult" ar
+        WHERE ar."timestamp" >= NOW() - INTERVAL '${windowDays} days'
+        ORDER BY ar."timestamp" DESC
         LIMIT $1
       `, [limit]);
 
       trends = rows.map(r => ({
-        timestamp: new Date(r.ts),
-        avgScore: Number(r.avg_score) || 0,
-        maxScore: Number(r.max_score) || 0,
-        criticalAlerts: Number(r.critical) || 0
+        timestamp: r.timestamp,
+        avgScore: Number(r.score) || 0,
+        maxScore: Number(r.score) || 0,
+        criticalAlerts: r.severity === 'critical' ? 1 : 0
       }));
-    } catch (aggErr) {
-      console.warn('[Trends] HistoricalData aggregation failed, trying AnalysisResult:', aggErr);
+    } catch (trendErr) {
+      console.warn('[Trends] AnalysisResult query failed, falling back to snapshots:', trendErr);
 
-      try {
-        const rows2 = await query<TrendRow>(`
-          SELECT
-            date_trunc('${granularity}', ar."timestamp") AS ts,
-            AVG(ar."score") AS avg_score,
-            MAX(ar."score") AS max_score,
-            SUM(CASE WHEN ar."severity" = 'critical' THEN 1 ELSE 0 END) AS critical
-          FROM "AnalysisResult" ar
-          WHERE ar."timestamp" >= NOW() - INTERVAL '${windowDays} days'
-          GROUP BY ts
-          ORDER BY ts DESC
-          LIMIT $1
-        `, [limit]);
+      const snapshots = await query<{
+        timestamp: Date;
+        avgScore: number;
+        maxScore: number;
+        criticalAlerts: number;
+      }>(`
+        SELECT timestamp, "avgScore", "maxScore", "criticalAlerts"
+        FROM "TrendAnalysis"
+        WHERE period = $1
+        ORDER BY timestamp DESC
+        LIMIT $2
+      `, [period, limit]);
 
-        trends = rows2.map(r => ({
-          timestamp: new Date(r.ts),
-          avgScore: Number(r.avg_score) || 0,
-          maxScore: Number(r.max_score) || 0,
-          criticalAlerts: Number(r.critical) || 0
-        }));
-      } catch (agg2Err) {
-        console.warn('[Trends] AnalysisResult aggregation failed, falling back to snapshots:', agg2Err);
-
-        const snapshots = await query<{
-          timestamp: Date;
-          avgScore: number;
-          maxScore: number;
-          criticalAlerts: number;
-        }>(`
-          SELECT timestamp, "avgScore", "maxScore", "criticalAlerts"
-          FROM "TrendAnalysis"
-          WHERE period = $1
-          ORDER BY timestamp DESC
-          LIMIT $2
-        `, [period, limit]);
-
-        trends = snapshots.map(s => ({
-          timestamp: s.timestamp,
-          avgScore: s.avgScore,
-          maxScore: s.maxScore,
-          criticalAlerts: s.criticalAlerts
-        }));
-      }
+      trends = snapshots.map(s => ({
+        timestamp: s.timestamp,
+        avgScore: s.avgScore,
+        maxScore: s.maxScore,
+        criticalAlerts: s.criticalAlerts
+      }));
     }
 
     // Get historical data for visualization
@@ -176,7 +146,7 @@ export async function GET(request: Request) {
       maxScoreRecorded: trends.length > 0
         ? Math.max(...trends.map(t => t.maxScore))
         : 0,
-      totalAnalyses: undefined as number | undefined,
+      totalAnalyses: trends.length,
       criticalAlertsCount: trends.reduce((sum, t) => sum + t.criticalAlerts, 0),
       trend: calculateTrend(trends)
     };

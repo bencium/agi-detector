@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS "AnalysisResult" (
     "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
     "crawlId" TEXT NOT NULL,
     "score" DOUBLE PRECISION NOT NULL,
+    "modelScore" DOUBLE PRECISION,
+    "heuristicScore" DOUBLE PRECISION,
+    "scoreBreakdown" JSONB,
     "indicators" TEXT[] NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -35,3 +38,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS "AnalysisResult_crawlId_key" ON "AnalysisResul
 ALTER TABLE "AnalysisResult" ADD CONSTRAINT "AnalysisResult_crawlId_fkey" 
     FOREIGN KEY ("crawlId") REFERENCES "CrawlResult"("id") 
     ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- TrendAnalysis dedupe support (if table already exists)
+ALTER TABLE "TrendAnalysis" ADD COLUMN IF NOT EXISTS "dateBucket" DATE;
+CREATE UNIQUE INDEX IF NOT EXISTS "TrendAnalysis_period_dateBucket_key"
+  ON "TrendAnalysis"(period, "dateBucket");
+
+-- Evidence claims table
+CREATE TABLE IF NOT EXISTS "EvidenceClaim" (
+    id TEXT NOT NULL DEFAULT gen_random_uuid(),
+    "crawlId" TEXT NOT NULL,
+    claim TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    benchmark TEXT,
+    metric TEXT,
+    value DOUBLE PRECISION,
+    delta DOUBLE PRECISION,
+    unit TEXT,
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    numbers DOUBLE PRECISION[] NOT NULL DEFAULT '{}',
+    url TEXT,
+    "canonicalUrl" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "EvidenceClaim_pkey" PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "EvidenceClaim_crawlId_claim_key" ON "EvidenceClaim"("crawlId", claim);
+CREATE INDEX IF NOT EXISTS "EvidenceClaim_crawlId_idx" ON "EvidenceClaim"("crawlId");
+CREATE INDEX IF NOT EXISTS "EvidenceClaim_benchmark_idx" ON "EvidenceClaim"(benchmark);
+
+-- Accuracy metrics (evals snapshots)
+CREATE TABLE IF NOT EXISTS "AccuracyMetrics" (
+    id TEXT NOT NULL DEFAULT gen_random_uuid(),
+    period TEXT NOT NULL,
+    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "truePositives" INTEGER NOT NULL,
+    "falsePositives" INTEGER NOT NULL,
+    "trueNegatives" INTEGER NOT NULL,
+    "falseNegatives" INTEGER NOT NULL,
+    "precision" DOUBLE PRECISION NOT NULL,
+    recall DOUBLE PRECISION NOT NULL,
+    "f1Score" DOUBLE PRECISION NOT NULL,
+    accuracy DOUBLE PRECISION NOT NULL,
+    "falsePositiveRate" DOUBLE PRECISION NOT NULL,
+    "falseNegativeRate" DOUBLE PRECISION NOT NULL,
+    "totalReviewed" INTEGER NOT NULL,
+    "avgConfidence" DOUBLE PRECISION,
+    notes TEXT,
+    CONSTRAINT "AccuracyMetrics_pkey" PRIMARY KEY (id)
+);

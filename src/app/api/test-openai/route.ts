@@ -1,8 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'test-openai' });
+    if (limited) return limited;
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [

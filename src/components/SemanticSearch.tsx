@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { apiFetch } from '@/lib/client/api';
 
 interface SearchResult {
   id: string;
@@ -33,7 +34,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({ onResultClick })
     setHasSearched(true);
 
     try {
-      const res = await fetch(`/api/semantic-search?q=${encodeURIComponent(query)}&limit=10`);
+      const res = await apiFetch(`/api/semantic-search?q=${encodeURIComponent(query)}&limit=10`);
       const data = await res.json();
 
       if (data.success) {

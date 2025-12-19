@@ -1,9 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { crawlWithAdvancedMethods, cleanupBrowser } from '@/lib/advanced-crawler';
 import { crawlSource } from '@/lib/crawler';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'test-crawler' });
+    if (limited) return limited;
+
     const { source } = await request.json();
     
     if (!source) {

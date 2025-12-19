@@ -1,3 +1,6 @@
+import net from 'net';
+import { lookup } from 'dns/promises';
+
 /**
  * URL Security Validator
  * Prevents SSRF (Server-Side Request Forgery) attacks by validating URLs
@@ -8,6 +11,8 @@ export interface UrlValidationResult {
   safe: boolean;
   reason?: string;
 }
+
+type IpCheckResult = { safe: boolean; reason?: string };
 
 /**
  * Check if a URL is safe to crawl
@@ -34,17 +39,12 @@ export function isUrlSafe(url: string): UrlValidationResult {
       };
     }
 
-    // Block private IPv4 ranges (RFC 1918)
-    const privateIPv4Ranges = [
-      /^10\./,                          // 10.0.0.0/8
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,  // 172.16.0.0/12
-      /^192\.168\./,                    // 192.168.0.0/16
-    ];
-
-    if (privateIPv4Ranges.some(range => range.test(hostname))) {
+    // Block direct IPs that are private or special-use
+    const ipCheck = checkIpSafety(hostname);
+    if (!ipCheck.safe) {
       return {
         safe: false,
-        reason: 'Private IP address access blocked'
+        reason: ipCheck.reason
       };
     }
 
@@ -94,6 +94,101 @@ export function isUrlSafe(url: string): UrlValidationResult {
       reason: `Invalid URL: ${error instanceof Error ? error.message : 'Unknown error'}`
     };
   }
+}
+
+/**
+ * Resolve DNS and block if hostname resolves to private/special IPs.
+ */
+export async function isUrlSafeWithDns(url: string): Promise<UrlValidationResult> {
+  const basic = isUrlSafe(url);
+  if (!basic.safe) return basic;
+
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Only resolve if hostname is not already an IP literal
+    if (isIpLiteral(hostname)) {
+      return { safe: true };
+    }
+
+    const results = await lookup(hostname, { all: true });
+
+    for (const result of results) {
+      const ipCheck = checkIpSafety(result.address);
+      if (!ipCheck.safe) {
+        return {
+          safe: false,
+          reason: `Hostname resolves to blocked IP (${result.address}): ${ipCheck.reason}`
+        };
+      }
+    }
+
+    return { safe: true };
+  } catch (error) {
+    return {
+      safe: false,
+      reason: `DNS resolution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    };
+  }
+}
+
+function isIpLiteral(hostname: string): boolean {
+  if (hostname.startsWith('[') && hostname.endsWith(']')) return true;
+  return net.isIP(hostname) !== 0;
+}
+
+function checkIpSafety(input: string): IpCheckResult {
+  const hostname = input.replace(/^\[|\]$/g, '').toLowerCase();
+  const ipVersion = net.isIP(hostname);
+  if (!ipVersion) {
+    return { safe: true };
+  }
+
+  const ip = normalizeIp(hostname);
+  if (!ip) {
+    return { safe: false, reason: 'Invalid IP address' };
+  }
+
+  if (ipVersion === 4) {
+    if (isPrivateIPv4(ip)) {
+      return { safe: false, reason: 'Private or special IPv4 address blocked' };
+    }
+    return { safe: true };
+  }
+
+  if (isPrivateIPv6(ip)) {
+    return { safe: false, reason: 'Private or special IPv6 address blocked' };
+  }
+
+  return { safe: true };
+}
+
+function normalizeIp(ip: string): string | null {
+  if (ip.startsWith('::ffff:')) {
+    return ip.replace('::ffff:', '');
+  }
+  return ip;
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  if (ip === '0.0.0.0') return true;
+  if (ip.startsWith('127.')) return true;
+  if (ip.startsWith('10.')) return true;
+  if (ip.startsWith('192.168.')) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
+  if (ip.startsWith('169.254.')) return true; // link-local
+  if (ip.startsWith('100.64.')) return true; // carrier-grade NAT
+  return false;
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === '::' || lower === '::1') return true;
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique local
+  if (lower.startsWith('fe80')) return true; // link-local
+  if (lower.startsWith('::ffff:')) return isPrivateIPv4(lower.replace('::ffff:', ''));
+  return false;
 }
 
 /**

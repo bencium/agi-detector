@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query, execute, isDbEnabled } from '@/lib/db';
 import { computeSeverity } from '@/lib/severity';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 interface AnalysisRow {
   id: string;
@@ -8,10 +9,13 @@ interface AnalysisRow {
   severity: string | null;
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'DB disabled' }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 1, keyPrefix: 'backfill-severities' });
+  if (limited) return limited;
 
   try {
     const batchSize = 500;

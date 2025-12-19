@@ -5,6 +5,14 @@ import { crawlSource, SOURCES } from '@/lib/crawler';
 import { computeSeverity } from '@/lib/severity';
 import { safeJsonParse } from '@/lib/utils/safeJson';
 import { z } from 'zod';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
+import { computeCombinedScore, computeHeuristicScore } from '@/lib/scoring/multiSignal';
+import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
+import {
+  analyzeForSecrecyIndicators,
+  analyzeResearcherDepartures,
+  SecrecyIndicator
+} from '@/lib/detection/silence-patterns';
 
 const validateRequestSchema = z.object({
   analysisId: z.string().uuid('Invalid analysis ID format')
@@ -37,18 +45,41 @@ Provide your validation as JSON:
 interface AnalysisWithCrawl {
   id: string;
   score: number;
+  modelScore?: number | null;
+  heuristicScore?: number | null;
   confidence: number;
   indicators: string[];
   severity: string | null;
   crossReferences: string[];
   title: string;
   content: string;
+  metadata?: {
+    source?: string;
+    timestamp?: string;
+    evidence?: {
+      snippets?: string[];
+      claims?: Array<{
+        claim: string;
+        evidence: string;
+        tags: string[];
+        numbers: number[];
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
+  } | null;
 }
 
 export async function POST(request: Request) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'Database not configured' }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'validate' });
+  if (limited) return limited;
 
   try {
     const body = await request.json();
@@ -68,12 +99,15 @@ export async function POST(request: Request) {
       SELECT
         ar.id,
         ar.score,
+        ar."modelScore",
+        ar."heuristicScore",
         ar.confidence,
         ar.indicators,
         ar.severity,
         ar."crossReferences",
         cr.title,
-        cr.content
+        cr.content,
+        cr.metadata
       FROM "AnalysisResult" ar
       JOIN "CrawlResult" cr ON ar."crawlId" = cr.id
       WHERE ar.id = $1
@@ -92,12 +126,16 @@ export async function POST(request: Request) {
       .replace('{indicators}', analysis.indicators.join(', '))
       .replace('{severity}', analysis.severity || 'none');
 
+    const evidenceSnippets = analysis.metadata?.evidence?.snippets || [];
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     const vOptions = {
       model,
       messages: [
         { role: "system" as const, content: validationPrompt },
-        { role: "user" as const, content: `Title: ${analysis.title}\n\nContent: ${analysis.content}` }
+        {
+          role: "user" as const,
+          content: `Title: ${analysis.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n\nContent: ${analysis.content}`
+        }
       ],
       response_format: { type: "json_object" as const }
     };
@@ -124,8 +162,40 @@ export async function POST(request: Request) {
     }
 
     // Calculate final score and confidence
-    const newScore = validationResult.validatedScore || analysis.score;
-    const finalScore = Math.max(analysis.score, newScore);
+    const modelScore = validationResult.validatedScore || analysis.modelScore || analysis.score;
+    const heuristic = computeHeuristicScore({
+      claims: analysis.metadata?.evidence?.claims || [],
+      snippetsCount: analysis.metadata?.evidence?.snippets?.length || 0
+    });
+
+    const secrecyIndicators = analyzeForSecrecyIndicators(
+      analysis.content,
+      analysis.metadata?.source || 'Unknown',
+      analysis.metadata?.timestamp || new Date().toISOString()
+    );
+    const departureIndicators = analyzeResearcherDepartures(
+      analysis.content,
+      analysis.metadata?.source || 'Unknown'
+    );
+    const allSecrecyIndicators = [...secrecyIndicators, ...departureIndicators];
+    let secrecyBoost = 0;
+    const criticalSecrecy = allSecrecyIndicators.filter((si: SecrecyIndicator) => si.severity === 'critical').length;
+    const highSecrecy = allSecrecyIndicators.filter((si: SecrecyIndicator) => si.severity === 'high').length;
+    if (criticalSecrecy > 0) secrecyBoost = 0.2;
+    else if (highSecrecy > 0) secrecyBoost = 0.1;
+
+    const signals = [...heuristic.signals];
+    if (secrecyBoost > 0) {
+      signals.push({ name: 'secrecy', value: secrecyBoost, detail: criticalSecrecy > 0 ? 'critical' : 'high' });
+    }
+    const combined = computeCombinedScore({
+      modelScore,
+      heuristicScore: heuristic.score,
+      secrecyBoost,
+      signals
+    });
+
+    const finalScore = Math.max(analysis.score, combined.combinedScore);
 
     const prevConfidence = analysis.confidence;
     const addedIndicators = (validationResult.additionalIndicators || []).length;
@@ -138,7 +208,9 @@ export async function POST(request: Request) {
       newConfidence,
       addedIndicators,
       recommendation: validationResult.recommendation || 'investigate',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      modelScore,
+      heuristicScore: heuristic.score
     };
 
     const newSeverity = computeSeverity(finalScore, (analysis.severity || 'none') as 'none' | 'low' | 'medium' | 'high' | 'critical');
@@ -147,6 +219,7 @@ export async function POST(request: Request) {
     const mergedIndicators = [...new Set([...analysis.indicators, ...(validationResult.additionalIndicators || [])])];
 
     // Update analysis
+    await ensureAnalysisScoreSchema();
     await execute(`
       UPDATE "AnalysisResult"
       SET
@@ -156,9 +229,12 @@ export async function POST(request: Request) {
         severity = $3,
         indicators = $4,
         "validatedAt" = NOW(),
-        "lastValidation" = $5
-      WHERE id = $6
-    `, [newConfidence, finalScore, newSeverity, mergedIndicators, JSON.stringify(lastValidation), analysisId]);
+        "lastValidation" = $5,
+        "modelScore" = $6,
+        "heuristicScore" = $7,
+        "scoreBreakdown" = $8
+      WHERE id = $9
+    `, [newConfidence, finalScore, newSeverity, mergedIndicators, JSON.stringify(lastValidation), modelScore, heuristic.score, JSON.stringify(combined.breakdown), analysisId]);
 
     // Get updated analysis
     const updatedAnalysis = await queryOne<{

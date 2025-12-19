@@ -5,6 +5,7 @@ import {
   calculateAGIProgress,
   cleanupARCSources
 } from '@/lib/arc-sources';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -23,6 +24,9 @@ export async function GET(request: NextRequest) {
   console.log('[ARC API] Starting ARC data fetch...');
 
   try {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'arc' });
+    if (limited) return limited;
+
     // Check for cached data first (within last hour)
     if (isDbEnabled) {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -137,6 +141,9 @@ export async function POST(request: NextRequest) {
   console.log('[ARC API] Force refresh requested');
 
   try {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'arc-refresh' });
+    if (limited) return limited;
+
     const arcData = await fetchAllARCData();
     const progress = calculateAGIProgress(arcData.summary.topScore);
 

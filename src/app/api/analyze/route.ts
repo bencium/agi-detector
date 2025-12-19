@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query, insert, isDbEnabled } from '@/lib/db';
 import { openai, AGI_DETECTION_PROMPT, generateEmbedding } from '@/lib/openai';
 import { computeSeverity } from '@/lib/severity';
@@ -8,6 +8,10 @@ import {
   analyzeResearcherDepartures,
   SecrecyIndicator
 } from '@/lib/detection/silence-patterns';
+import { upsertTrendSnapshot } from '@/lib/trends';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
+import { computeCombinedScore, computeHeuristicScore } from '@/lib/scoring/multiSignal';
+import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 
 interface CrawlResult {
   id: string;
@@ -15,7 +19,24 @@ interface CrawlResult {
   title: string;
   content: string;
   timestamp: Date;
-  metadata: { source?: string; timestamp?: string } | null;
+  metadata: {
+    source?: string;
+    timestamp?: string;
+    evidence?: {
+      snippets?: string[];
+      claims?: Array<{
+        claim: string;
+        evidence: string;
+        tags: string[];
+        numbers: number[];
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
+  } | null;
 }
 
 interface AnalysisResult {
@@ -42,18 +63,13 @@ async function updateTrendAnalysis() {
 
   if (dailyAnalyses.length > 0) {
     const scores = dailyAnalyses.map(a => a.score);
-    await insert(
-      `INSERT INTO "TrendAnalysis" (period, "avgScore", "maxScore", "minScore", "totalAnalyses", "criticalAlerts")
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        'daily',
-        scores.reduce((a, b) => a + b, 0) / scores.length,
-        Math.max(...scores),
-        Math.min(...scores),
-        dailyAnalyses.length,
-        dailyAnalyses.filter(a => a.severity === 'critical').length
-      ]
-    );
+    await upsertTrendSnapshot('daily', {
+      avgScore: scores.reduce((a, b) => a + b, 0) / scores.length,
+      maxScore: Math.max(...scores),
+      minScore: Math.min(...scores),
+      totalAnalyses: dailyAnalyses.length,
+      criticalAlerts: dailyAnalyses.filter(a => a.severity === 'critical').length
+    });
   }
 
   // Weekly trends
@@ -64,28 +80,26 @@ async function updateTrendAnalysis() {
 
   if (weeklyAnalyses.length > 0) {
     const scores = weeklyAnalyses.map(a => a.score);
-    await insert(
-      `INSERT INTO "TrendAnalysis" (period, "avgScore", "maxScore", "minScore", "totalAnalyses", "criticalAlerts")
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        'weekly',
-        scores.reduce((a, b) => a + b, 0) / scores.length,
-        Math.max(...scores),
-        Math.min(...scores),
-        weeklyAnalyses.length,
-        weeklyAnalyses.filter(a => a.severity === 'critical').length
-      ]
-    );
+    await upsertTrendSnapshot('weekly', {
+      avgScore: scores.reduce((a, b) => a + b, 0) / scores.length,
+      maxScore: Math.max(...scores),
+      minScore: Math.min(...scores),
+      totalAnalyses: weeklyAnalyses.length,
+      criticalAlerts: weeklyAnalyses.filter(a => a.severity === 'critical').length
+    });
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json(
       { success: false, error: 'Database not configured' },
       { status: 503 }
     );
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'analyze' });
+  if (limited) return limited;
 
   try {
     // Get the latest crawl result without analysis
@@ -107,13 +121,21 @@ export async function POST() {
       );
     }
 
+    const metadata = latestCrawl.metadata;
+    const sourceName = metadata?.source || 'Unknown';
+    const timestamp = metadata?.timestamp || new Date().toISOString();
+    const evidenceSnippets = metadata?.evidence?.snippets || [];
+
     // Analyze content using OpenAI
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     const options = {
       model,
       messages: [
         { role: "system" as const, content: AGI_DETECTION_PROMPT },
-        { role: "user" as const, content: `Title: ${latestCrawl.title}\n\nContent: ${latestCrawl.content}` }
+        {
+          role: "user" as const,
+          content: `Title: ${latestCrawl.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n\nContent: ${latestCrawl.content}`
+        }
       ],
       response_format: { type: "json_object" as const }
     };
@@ -125,12 +147,9 @@ export async function POST() {
     }
 
     const analysisResult = parseOpenAIResponse(content);
+    const modelScore = analysisResult.score || 0;
 
     // Run silence detection
-    const metadata = latestCrawl.metadata;
-    const sourceName = metadata?.source || 'Unknown';
-    const timestamp = metadata?.timestamp || new Date().toISOString();
-
     const secrecyIndicators = analyzeForSecrecyIndicators(
       latestCrawl.content,
       sourceName,
@@ -146,17 +165,34 @@ export async function POST() {
     ];
 
     // Boost score for secrecy patterns
-    let adjustedScore = analysisResult.score || 0;
+    let secrecyBoost = 0;
     const criticalSecrecy = allSecrecyIndicators.filter((si: SecrecyIndicator) => si.severity === 'critical').length;
     const highSecrecy = allSecrecyIndicators.filter((si: SecrecyIndicator) => si.severity === 'high').length;
 
     if (criticalSecrecy > 0) {
-      adjustedScore = Math.min(1.0, adjustedScore + 0.2);
+      secrecyBoost = 0.2;
     } else if (highSecrecy > 0) {
-      adjustedScore = Math.min(1.0, adjustedScore + 0.1);
+      secrecyBoost = 0.1;
     }
 
-    const severity = computeSeverity(adjustedScore, analysisResult.severity);
+    const claims = metadata?.evidence?.claims || [];
+    const heuristic = computeHeuristicScore({
+      claims,
+      snippetsCount: metadata?.evidence?.snippets?.length || 0
+    });
+
+    const signals = [...heuristic.signals];
+    if (secrecyBoost > 0) {
+      signals.push({ name: 'secrecy', value: secrecyBoost, detail: criticalSecrecy > 0 ? 'critical' : 'high' });
+    }
+    const combined = computeCombinedScore({
+      modelScore,
+      heuristicScore: heuristic.score,
+      secrecyBoost,
+      signals
+    });
+
+    const severity = computeSeverity(combined.combinedScore, analysisResult.severity);
 
     // Generate embedding for semantic search (async, ~100ms)
     let embeddingValue: string | null = null;
@@ -168,15 +204,16 @@ export async function POST() {
       console.warn('[Analyze] Embedding generation failed, will be null:', err);
     }
 
+    await ensureAnalysisScoreSchema();
     // Store analysis results
     const analysis = await insert<AnalysisResult>(
       `INSERT INTO "AnalysisResult"
-       (id, "crawlId", score, confidence, indicators, severity, "evidenceQuality", "requiresVerification", "crossReferences", explanation, embedding)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector)
+       (id, "crawlId", score, confidence, indicators, severity, "evidenceQuality", "requiresVerification", "crossReferences", explanation, embedding, "modelScore", "heuristicScore", "scoreBreakdown")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, $13::jsonb)
        RETURNING id, "crawlId", score, confidence, indicators, severity, explanation, timestamp`,
       [
         latestCrawl.id,
-        adjustedScore,
+        combined.combinedScore,
         analysisResult.confidence || 0,
         combinedIndicators,
         severity,
@@ -184,7 +221,10 @@ export async function POST() {
         analysisResult.requires_verification || criticalSecrecy > 0,
         analysisResult.cross_references || [],
         analysisResult.explanation || 'No analysis available',
-        embeddingValue
+        embeddingValue,
+        modelScore,
+        heuristic.score,
+        JSON.stringify(combined.breakdown)
       ]
     );
 
@@ -213,7 +253,15 @@ export async function POST() {
     // Store historical data
     await insert(
       `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
-      [analysis.id, 'score', analysisResult.score || 0]
+      [analysis.id, 'score', combined.combinedScore]
+    );
+    await insert(
+      `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+      [analysis.id, 'model_score', modelScore]
+    );
+    await insert(
+      `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+      [analysis.id, 'heuristic_score', heuristic.score]
     );
     await insert(
       `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,

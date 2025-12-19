@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query, insert, isDbEnabled } from '@/lib/db';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 interface AnalysisRow {
   id: string;
@@ -8,10 +9,13 @@ interface AnalysisRow {
   indicators: string[];
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'DB disabled' }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 1, keyPrefix: 'backfill-historical' });
+  if (limited) return limited;
 
   try {
     const batchSize = 200;

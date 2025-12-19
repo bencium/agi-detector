@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, execute, isDbEnabled } from '@/lib/db';
 import { generateEmbedding } from '@/lib/openai';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 interface AnalysisForEmbedding {
   id: string;
@@ -15,6 +16,9 @@ export async function POST(request: NextRequest) {
       error: 'Database not configured'
     }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 1, keyPrefix: 'backfill-embeddings' });
+  if (limited) return limited;
 
   const searchParams = request.nextUrl.searchParams;
   const limit = parseInt(searchParams.get('limit') || '50', 10);

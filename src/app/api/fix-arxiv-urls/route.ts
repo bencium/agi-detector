@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query, execute, isDbEnabled } from '@/lib/db';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 const NEW_STYLE = /\b(\d{4}\.\d{4,5})(v\d+)?\b/;
 const OLD_STYLE = /\b([a-z\-]+(?:\.[A-Za-z\-]+)?\/\d{7})(v\d+)?\b/i;
@@ -60,10 +61,13 @@ function deriveArxivUrl(row: CrawlRow): string | null {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'DB disabled' }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 1, keyPrefix: 'fix-arxiv-urls' });
+  if (limited) return limited;
 
   try {
     const batch = 300;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, findSimilar, isDbEnabled } from '@/lib/db';
 import { generateEmbedding } from '@/lib/openai';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 interface AnalysisWithEmbedding {
   id: string;
@@ -17,6 +18,9 @@ export async function GET(request: NextRequest) {
       error: 'Database not configured'
     }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 10, keyPrefix: 'similar' });
+  if (limited) return limited;
 
   const searchParams = request.nextUrl.searchParams;
   const id = searchParams.get('id');

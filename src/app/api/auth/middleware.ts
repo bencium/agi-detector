@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authSchema } from '@/lib/validation/schema'
+import { validateApiKeyHeader } from '@/lib/security/auth'
 
-export async function validateApiKey(req: NextRequest) {
-  const apiKey = req.headers.get('x-api-key')
-
-  if (!apiKey) {
+export function requireApiKey(req: NextRequest): NextResponse | null {
+  const result = validateApiKeyHeader(req.headers, process.env.LOCAL_API_KEY)
+  if (!result.ok) {
     return NextResponse.json(
-      { success: false, error: 'API key required' },
-      { status: 401 }
+      { success: false, error: result.error },
+      { status: result.status }
     )
   }
 
-  try {
-    await authSchema.parseAsync({ apiKey })
-    // In a real app, validate against database/env
-    return NextResponse.next()
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: 'Invalid API key' },
-      { status: 401 }
-    )
-  }
+  return null
 }

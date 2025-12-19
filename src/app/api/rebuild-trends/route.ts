@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
-import { query, insert, isDbEnabled } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server';
+import { isDbEnabled } from '@/lib/db';
 import { z } from 'zod';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
+import { snapshotFromAnalysis } from '@/lib/trends';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
@@ -8,47 +10,13 @@ const rebuildQuerySchema = z.object({
   period: z.enum(['daily', 'weekly', 'monthly']).optional()
 });
 
-interface AggRow {
-  avg: number;
-  max: number;
-  min: number;
-  total: string;
-  critical: string;
-}
-
-async function snapshot(period: Period) {
-  const windowDays = period === 'monthly' ? 30 : period === 'weekly' ? 7 : 1;
-
-  const rows = await query<AggRow>(`
-    SELECT
-      COALESCE(AVG(ar."score"), 0) AS avg,
-      COALESCE(MAX(ar."score"), 0) AS max,
-      COALESCE(MIN(ar."score"), 0) AS min,
-      COUNT(*) AS total,
-      SUM(CASE WHEN ar."severity" = 'critical' THEN 1 ELSE 0 END) AS critical
-    FROM "AnalysisResult" ar
-    WHERE ar."timestamp" >= NOW() - INTERVAL '${windowDays} days'
-  `);
-
-  const row = rows[0];
-
-  await insert(`
-    INSERT INTO "TrendAnalysis" (id, period, "avgScore", "maxScore", "minScore", "totalAnalyses", "criticalAlerts")
-    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
-  `, [
-    period,
-    Number(row?.avg ?? 0),
-    Number(row?.max ?? 0),
-    Number(row?.min ?? 0),
-    Number(row?.total ?? 0),
-    Number(row?.critical ?? 0)
-  ]);
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json({ success: false, error: 'DB disabled' }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'rebuild-trends' });
+  if (limited) return limited;
 
   try {
     const { searchParams } = new URL(request.url);
@@ -66,13 +34,13 @@ export async function POST(request: Request) {
 
     const p = (validatedQuery.data.period as Period) || 'daily';
     if (p === 'daily') {
-      await snapshot('daily');
+      await snapshotFromAnalysis('daily');
     } else if (p === 'weekly') {
-      await snapshot('weekly');
+      await snapshotFromAnalysis('weekly');
     } else if (p === 'monthly') {
-      await snapshot('monthly');
+      await snapshotFromAnalysis('monthly');
     } else {
-      await Promise.all([snapshot('daily'), snapshot('weekly')]);
+      await Promise.all([snapshotFromAnalysis('daily'), snapshotFromAnalysis('weekly')]);
     }
 
     return NextResponse.json({ success: true });

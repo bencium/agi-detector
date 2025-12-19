@@ -15,17 +15,21 @@ interface TrendChartProps {
 }
 
 export default function TrendChart({ data, period }: TrendChartProps) {
-  if (!data || data.length === 0) {
+  if (!data || data.length < 2) {
     return (
       <div className="h-64 flex items-center justify-center text-[var(--muted)]">
-        No trend data available
+        Not enough history yet
       </div>
     );
   }
 
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
   // Calculate chart dimensions
-  const maxScore = data.length > 0 
-    ? Math.max(...data.map(d => d.maxScore || 0)) 
+  const maxScore = sortedData.length > 0 
+    ? Math.max(...sortedData.map(d => d.maxScore || 0)) 
     : 1;
   const chartHeight = 200;
   const chartWidth = 600;
@@ -48,8 +52,9 @@ export default function TrendChart({ data, period }: TrendChartProps) {
     return `M ${points.join(' L ')}`;
   };
 
-  const avgScorePath = generatePath(data.map(d => d.avgScore || 0));
-  const maxScorePath = generatePath(data.map(d => d.maxScore || 0));
+  const avgScorePath = generatePath(sortedData.map(d => d.avgScore || 0));
+  const maxScorePath = generatePath(sortedData.map(d => d.maxScore || 0));
+  const latestPoint = sortedData[sortedData.length - 1];
 
   return (
     <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">
@@ -102,10 +107,10 @@ export default function TrendChart({ data, period }: TrendChartProps) {
           />
 
           {/* Data points */}
-          {data.length > 0 && data.map((point, index) => {
-            const x = data.length === 1 
+          {sortedData.length > 0 && sortedData.map((point, index) => {
+            const x = sortedData.length === 1 
               ? chartWidth / 2 
-              : padding + (index * (chartWidth - 2 * padding)) / (data.length - 1);
+              : padding + (index * (chartWidth - 2 * padding)) / (sortedData.length - 1);
             const y = chartHeight - padding - ((point.avgScore || 0) * (chartHeight - 2 * padding));
             
             return (
@@ -155,19 +160,19 @@ export default function TrendChart({ data, period }: TrendChartProps) {
         <div>
           <div className="text-xs text-[var(--muted)]">Latest Score</div>
           <div className="text-lg font-semibold text-[var(--foreground)]">
-            {data.length > 0 ? `${((data[0]?.avgScore || 0) * 100).toFixed(1)}%` : '0.0%'}
+            {latestPoint ? `${((latestPoint.avgScore || 0) * 100).toFixed(1)}%` : '0.0%'}
           </div>
         </div>
         <div>
           <div className="text-xs text-[var(--muted)]">Peak Score</div>
           <div className="text-lg font-semibold text-[var(--danger)]">
-            {data.length > 0 ? `${(maxScore * 100).toFixed(1)}%` : '0.0%'}
+            {sortedData.length > 0 ? `${(maxScore * 100).toFixed(1)}%` : '0.0%'}
           </div>
         </div>
         <div>
           <div className="text-xs text-[var(--muted)]">Critical Alerts</div>
           <div className="text-lg font-semibold text-[var(--foreground)]">
-            {data.reduce((sum, d) => sum + (d.criticalAlerts || 0), 0)}
+            {sortedData.reduce((sum, d) => sum + (d.criticalAlerts || 0), 0)}
           </div>
         </div>
       </div>

@@ -2,7 +2,8 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { RateLimiter } from './openai';
 import { crawlWithAdvancedMethods, cleanupBrowser } from './advanced-crawler';
-import { isUrlSafe } from './security/urlValidator';
+import { isUrlSafeWithDns } from './security/urlValidator';
+import { buildCrawlMetadata } from './evidence';
 
 interface CrawledArticle {
   title: string;
@@ -12,6 +13,23 @@ interface CrawledArticle {
     source: string;
     timestamp: string;
     id: string;
+    fetchedAt?: string;
+    canonicalUrl?: string;
+    contentHash?: string;
+    evidence?: {
+      snippets: string[];
+      claims: Array<{
+        claim: string;
+        evidence: string;
+        tags: string[];
+        numbers: number[];
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
   };
 }
 
@@ -156,7 +174,7 @@ export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
     console.log(`[Crawler] Starting to crawl ${source.name} at ${source.url}`);
 
     // Security: Validate URL before crawling
-    const validation = isUrlSafe(source.url);
+    const validation = await isUrlSafeWithDns(source.url);
     if (!validation.safe) {
       console.warn(`[Crawler] Blocked unsafe URL for ${source.name}: ${source.url} - ${validation.reason}`);
       return [];
@@ -210,15 +228,18 @@ export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
         console.log(`[Crawler] URL: ${url}`);
 
         if (title && content) {
+          const metadata = buildCrawlMetadata({
+            source: source.name,
+            url,
+            content,
+            title,
+            id
+          });
           articles.push({
             title,
             content,
             url,
-            metadata: {
-              source: source.name,
-              timestamp: new Date().toISOString(),
-              id: id
-            },
+            metadata: metadata as CrawledArticle['metadata'],
           });
         }
       });
@@ -242,15 +263,18 @@ export async function crawlSource(source: Source): Promise<CrawledArticle[]> {
         console.log(`[Crawler] Content length: ${content?.length || 0} characters`);
 
         if (title && content) {
+          const metadata = buildCrawlMetadata({
+            source: source.name,
+            url,
+            content,
+            title,
+            id
+          });
           articles.push({
             title,
             content,
             url,
-            metadata: {
-              source: source.name,
-              timestamp: new Date().toISOString(),
-              id: id
-            },
+            metadata: metadata as CrawledArticle['metadata'],
           });
         } else {
           console.log(`[Crawler] Skipping element - missing title or content`);

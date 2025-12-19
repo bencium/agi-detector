@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query, insert, isDbEnabled } from '@/lib/db';
 import { crawlAllSources } from '@/lib/crawler';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
+import { upsertEvidenceClaims } from '@/lib/evidence/storage';
 
 interface CrawlResult {
   id: string;
@@ -11,13 +13,16 @@ interface CrawlResult {
   metadata: Record<string, unknown> | null;
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isDbEnabled) {
     return NextResponse.json({
       success: false,
       error: 'Database not configured'
     }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'crawl' });
+  if (limited) return limited;
 
   try {
     console.log('[Crawler API] Starting full crawl...');
@@ -30,9 +35,13 @@ export async function POST() {
     for (const result of crawledResults) {
       try {
         // Check if article already exists
+        const contentHash = (result.metadata as Record<string, unknown> | null)?.contentHash as string | undefined;
         const existing = await query<{ id: string }>(
-          `SELECT id FROM "CrawlResult" WHERE url = $1 AND title = $2 LIMIT 1`,
-          [result.url, result.title]
+          `SELECT id FROM "CrawlResult"
+           WHERE url = $1
+              OR ( $2 IS NOT NULL AND metadata->>'contentHash' = $2 )
+           LIMIT 1`,
+          [result.url, contentHash || null]
         );
 
         if (existing.length === 0) {
@@ -44,6 +53,15 @@ export async function POST() {
           );
 
           if (saved) {
+            const meta = result.metadata as Record<string, any> | null;
+            const claims = meta?.evidence?.claims || [];
+            const canonicalUrl = meta?.canonicalUrl as string | undefined;
+            await upsertEvidenceClaims({
+              crawlId: saved.id,
+              claims,
+              url: saved.url,
+              canonicalUrl
+            });
             savedResults.push(saved);
           }
         } else {

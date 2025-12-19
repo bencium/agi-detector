@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findAnomalies, isDbEnabled } from '@/lib/db';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
 export async function GET(request: NextRequest) {
   if (!isDbEnabled) {
@@ -8,6 +9,9 @@ export async function GET(request: NextRequest) {
       error: 'Database not configured'
     }, { status: 503 });
   }
+
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 30, keyPrefix: 'anomalies' });
+  if (limited) return limited;
 
   const searchParams = request.nextUrl.searchParams;
   const limit = parseInt(searchParams.get('limit') || '10', 10);

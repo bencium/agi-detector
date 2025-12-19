@@ -1,8 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { SOURCES, crawlSource } from '@/lib/crawler';
+import { enforceRateLimit } from '@/lib/security/rateLimit';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 5, keyPrefix: 'test-crawl' });
+    if (limited) return limited;
+
     // Test with arXiv
     const source = SOURCES.ACADEMIC[0];
     console.log('Testing crawler with source:', source);

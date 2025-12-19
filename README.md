@@ -142,9 +142,32 @@ DIRECT_URL="postgresql://user:password@host/database?sslmode=require"
 # OpenAI API Key
 API_KEY=sk-...
 
+# Local API auth (required)
+LOCAL_API_KEY=local-...
+NEXT_PUBLIC_LOCAL_API_KEY=local-...
+
 # Optional: Override default analysis model
 # Default: OPENAI_MODEL=gpt-5-mini
 # OPENAI_MODEL=gpt-5-mini
+
+# Optional: Analyze-all job limits
+# ANALYZE_JOB_LIMIT=50
+# ANALYZE_BATCH_SIZE=2
+# OPENAI_TIMEOUT_MS=12000
+# BATCH_TIMEOUT_MS=18000
+
+# Optional: Multi-signal scoring weights
+# MODEL_SCORE_WEIGHT=0.85
+# HEURISTIC_SCORE_WEIGHT=0.15
+# HEURISTIC_MAX=0.4
+
+# Optional: Evals threshold
+# EVAL_POSITIVE_THRESHOLD=0.3
+
+### Evals & Metrics
+- `GET /api/evals?days=30&threshold=0.3` — compute precision/recall/f1 from feedback.
+- `GET /api/evals?days=30&threshold=0.3&persist=true` — persist snapshot in `AccuracyMetrics`.
+- `GET /api/metrics` — quick pipeline counts + latest timestamps.
 
 # Firecrawl API Key (optional - for DeepMind and Anthropic)
 # Get your API key from https://www.firecrawl.dev/
@@ -166,6 +189,7 @@ BRAVE_API_KEY=bs-...
 **Important Notes about .env.local**:
 - Replace `DATABASE_URL` with your actual PostgreSQL connection string
 - Replace `API_KEY` with your OpenAI API key (no quotes needed)
+- Set `LOCAL_API_KEY` and `NEXT_PUBLIC_LOCAL_API_KEY` to the same local secret
 - Replace `FIRECRAWL_API_KEY` with your Firecrawl key (no quotes needed)
 - If provided, `BRAVE_API_KEY` enables Brave site search fallback
 - The format must be exactly as shown (no extra quotes around keys)

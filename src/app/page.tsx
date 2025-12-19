@@ -5,6 +5,7 @@ import TrendChart from '@/components/TrendChart';
 import ConsoleOutput from '@/components/ConsoleOutput';
 import { useConsoleCapture } from '@/hooks/useConsoleCapture';
 import { safeJsonParse } from '@/lib/utils/safeJson';
+import { apiFetch } from '@/lib/client/api';
 import { Skeleton, SkeletonStatCard, SkeletonSourceCard, SkeletonChart } from '@/components/Skeleton';
 import AGIProgressIndicator, { AGIProgressData } from '@/components/AGIProgressIndicator';
 import ARCChallengeCategories from '@/components/ARCChallengeCategories';
@@ -20,12 +21,27 @@ interface CrawlResult {
   metadata: {
     source: string;
     timestamp: string;
+    canonicalUrl?: string;
+    evidence?: {
+      snippets?: string[];
+      claims?: Array<{
+        claim: string;
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
   };
 }
 
 interface AnalysisResult {
   id: string;
   score: number;
+  modelScore?: number;
+  heuristicScore?: number;
+  scoreBreakdown?: Record<string, unknown>;
   confidence: number;
   indicators: string[];
   explanation: string;
@@ -33,7 +49,24 @@ interface AnalysisResult {
   evidenceQuality?: string;
   requiresVerification?: boolean;
   crossReferences?: string[];
-  crawl?: { url?: string; title?: string };
+  crawl?: {
+    url?: string;
+    title?: string;
+    metadata?: {
+      canonicalUrl?: string;
+      evidence?: {
+        snippets?: string[];
+        claims?: Array<{
+          claim: string;
+          benchmark?: string;
+          metric?: string;
+          value?: number;
+          delta?: number;
+          unit?: string;
+        }>;
+      };
+    } | null;
+  };
   validatedAt?: string;
   timestamp?: string | Date;
   lastValidation?: {
@@ -50,12 +83,10 @@ interface AnalysisResult {
 interface AnalyzeAllResponse {
   success: boolean;
   error?: string;
-  data?: {
-    summary?: {
-      totalAnalyzed?: number;
-    };
-  };
-  logs?: string[];
+  jobId?: string | null;
+  status?: string;
+  totalArticles?: number;
+  message?: string;
 }
 
 const shouldRunDailyCrawl = (lastRunTime: string | null): boolean => {
@@ -67,6 +98,68 @@ const shouldRunDailyCrawl = (lastRunTime: string | null): boolean => {
   return now.getTime() - lastRun.getTime() >= 24 * 60 * 60 * 1000;
 };
 
+const formatClaim = (claim: { benchmark?: string; metric?: string; value?: number; delta?: number; unit?: string; claim: string }) => {
+  const parts: string[] = [];
+  if (claim.benchmark) parts.push(claim.benchmark);
+  if (claim.metric) parts.push(claim.metric);
+  if (typeof claim.value === 'number') parts.push(`${claim.value}${claim.unit || ''}`);
+  if (typeof claim.delta === 'number') parts.push(`Δ ${claim.delta}${claim.unit || ''}`);
+  return parts.length > 0 ? parts.join(' · ') : claim.claim;
+};
+
+const CACHE_KEY = 'agi_detector_cache_v1';
+
+type CacheShape = {
+  crawlResults: CrawlResult[];
+  analyses: AnalysisResult[];
+  sourceStats: Record<string, number>;
+  lastCrawlTime: string | null;
+  trends?: Record<string, any[]>;
+};
+
+const readCache = (): CacheShape | null => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CacheShape;
+  } catch {
+    return null;
+  }
+};
+
+const updateCache = (patch: Partial<CacheShape>) => {
+  try {
+    const existing = readCache() || {
+      crawlResults: [],
+      analyses: [],
+      sourceStats: {},
+      lastCrawlTime: null,
+      trends: {}
+    };
+    const merged: CacheShape = {
+      ...existing,
+      ...patch,
+      trends: { ...(existing.trends || {}), ...(patch.trends || {}) }
+    };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(merged));
+  } catch {
+    // Ignore cache write errors
+  }
+};
+
+const buildMonitoringStatus = (stats: Record<string, number>): SourceStatus[] => ([
+  { name: 'openai', displayName: 'OpenAI', type: 'research_lab', status: 'active', articleCount: stats['OpenAI Blog'] || 0 },
+  { name: 'deepmind', displayName: 'DeepMind', type: 'research_lab', status: 'active', articleCount: stats['DeepMind Research'] || 0 },
+  { name: 'anthropic', displayName: 'Anthropic', type: 'research_lab', status: 'active', articleCount: stats['Anthropic Blog'] || 0 },
+  { name: 'microsoft', displayName: 'Microsoft AI', type: 'corporate', status: 'active', articleCount: stats['Microsoft AI Blog'] || 0 },
+  { name: 'arxiv', displayName: 'arXiv AI', type: 'academic', status: 'active', articleCount: stats['arXiv AI'] || 0 },
+  { name: 'techcrunch', displayName: 'TechCrunch', type: 'news', status: 'active', articleCount: stats['TechCrunch AI'] || 0 },
+  { name: 'venturebeat', displayName: 'VentureBeat', type: 'news', status: 'active', articleCount: stats['VentureBeat AI'] || 0 },
+  { name: 'arc_official', displayName: 'ARC Prize Leaderboard', type: 'benchmark', status: 'active', lastCheck: new Date().toISOString() },
+  { name: 'arc_kaggle', displayName: 'Kaggle ARC-AGI-2', type: 'kaggle', status: 'active', lastCheck: new Date().toISOString() },
+  { name: 'arc_github', displayName: 'ARC-AGI-2 GitHub', type: 'github', status: 'active', lastCheck: new Date().toISOString() }
+]);
+
 export default function Home(): React.ReactElement {
   const [crawlResults, setCrawlResults] = useState<CrawlResult[]>([]);
   const [analyses, setAnalyses] = useState<AnalysisResult[]>([]);
@@ -75,6 +168,7 @@ export default function Home(): React.ReactElement {
   const [lastCrawlTime, setLastCrawlTime] = useState<string | null>(null);
   const [nextScheduledCrawl, setNextScheduledCrawl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -139,97 +233,76 @@ export default function Home(): React.ReactElement {
     setJobProgress(null);
     addLog('Starting AI analysis of all unanalyzed articles...');
 
-    // Start the analysis job
-    const analyzePromise = fetch('/api/analyze-all', { method: 'POST' });
-
-    // Poll for progress while the job runs
-    const pollInterval = setInterval(async () => {
-      try {
-        const statusResponse = await fetch('/api/analyze-status');
-        const statusData = await statusResponse.json();
-
-        if (statusData.success && statusData.data) {
-          const job = statusData.data;
-          setJobProgress({
-            status: job.status,
-            progress: job.progress,
-            processedArticles: job.processedArticles,
-            totalArticles: job.totalArticles,
-            currentArticle: job.currentArticle,
-            eta: job.eta,
-            successfulAnalyses: job.successfulAnalyses,
-            failedAnalyses: job.failedAnalyses
-          });
-
-          // Update total analyzed count for backward compatibility
-          setTotalAnalyzed(job.successfulAnalyses || 0);
-
-          // Log progress updates
-          if (job.status === 'running' && job.currentArticle) {
-            addLog(`[${job.progress}%] Analyzing: ${job.currentArticle.slice(0, 60)}...`);
-          }
-
-          // Stop polling if job is done
-          if (job.status === 'completed' || job.status === 'failed') {
-            clearInterval(pollInterval);
-          }
-        }
-      } catch (e) {
-        // Silently ignore polling errors
-      }
-    }, 3000); // Poll every 3 seconds
-
     try {
-      const response = await analyzePromise;
-      clearInterval(pollInterval);
+      const response = await apiFetch('/api/analyze-all', { method: 'POST' });
 
       if (!response.ok) {
         throw new Error(`Analysis failed: ${response.status} ${response.statusText}`);
       }
 
       const text = await response.text();
-      const data = safeJsonParse<AnalyzeAllResponse & { jobId?: string }>(text, {
+      const data = safeJsonParse<{ success: boolean; jobId?: string | null; message?: string; error?: string }>(text, {
         success: false,
         error: 'Failed to parse server response'
       });
 
-      if (data.success && data.data?.summary) {
-        const totalAnalyzedCount = data.data.summary.totalAnalyzed || 0;
-        setTotalAnalyzed(totalAnalyzedCount);
-
-        if (data.logs && Array.isArray(data.logs)) {
-          // Only show summary logs to avoid flooding
-          const summaryLogs = data.logs.filter((log: string) =>
-            log.includes('Batch completed') || log.includes('Found') || log.includes('Created job')
-          );
-          summaryLogs.forEach((log: string) => addLog(log));
-        }
-
-        addLog(`✅ Analysis complete! ${totalAnalyzedCount} articles analyzed`);
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to start analysis');
       }
 
-      // Check if there are more articles to analyze
-      const unanalyzedCount = crawlResults.length - analyses.length - (data.data?.summary?.totalAnalyzed || 0);
-      if (unanalyzedCount > 0 && data.data?.summary?.totalAnalyzed === 50) {
-        addLog(`⏳ ${unanalyzedCount} articles remaining. Starting next batch...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        await analyzeData(); // Recursive call for next batch
+      if (!data.jobId) {
+        addLog(data.message || 'No unanalyzed articles found.');
+        setIsLoading(false);
         return;
       }
 
-      // Reload all data to get the new analyses
-      await loadExistingData();
+      addLog(`Queued analysis job: ${data.jobId}`);
 
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await apiFetch(`/api/analyze-status?jobId=${data.jobId}`);
+          const statusData = await statusResponse.json();
+
+          if (statusData.success && statusData.data) {
+            const job = statusData.data;
+            setJobProgress({
+              status: job.status,
+              progress: job.progress,
+              processedArticles: job.processedArticles,
+              totalArticles: job.totalArticles,
+              currentArticle: job.currentArticle,
+              eta: job.eta,
+              successfulAnalyses: job.successfulAnalyses,
+              failedAnalyses: job.failedAnalyses
+            });
+
+            setTotalAnalyzed(job.successfulAnalyses || 0);
+
+            if (job.status === 'running' && job.currentArticle) {
+              addLog(`[${job.progress}%] Analyzing: ${job.currentArticle.slice(0, 60)}...`);
+            }
+
+            if (job.status === 'completed' || job.status === 'failed') {
+              clearInterval(pollInterval);
+              await loadExistingData();
+              addLog(job.status === 'completed' ? '✅ Analysis complete!' : '❌ Analysis failed.');
+              setIsLoading(false);
+              setJobProgress(null);
+              setTotalAnalyzed(0);
+            }
+          }
+        } catch (e) {
+          // Silently ignore polling errors
+        }
+      }, 3000);
     } catch (error) {
-      clearInterval(pollInterval);
       console.error('Analysis failed:', error);
       addLog(`❌ Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setError(error instanceof Error ? error.message : 'Analysis failed');
+      setIsLoading(false);
+      setJobProgress(null);
+      setTotalAnalyzed(0);
     }
-
-    setIsLoading(false);
-    setJobProgress(null);
-    setTotalAnalyzed(0);
   };
 
   const startCrawling = async () => {
@@ -240,7 +313,7 @@ export default function Home(): React.ReactElement {
     
     try {
       addLog('Fetching from: OpenAI, DeepMind, Anthropic, Microsoft AI, arXiv, TechCrunch, VentureBeat');
-      const response = await fetch('/api/crawl', { 
+      const response = await apiFetch('/api/crawl', { 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -311,8 +384,18 @@ export default function Home(): React.ReactElement {
 
   const loadExistingData = async () => {
     try {
+      const cached = readCache();
+      if (cached) {
+        setCrawlResults(cached.crawlResults || []);
+        setAnalyses(cached.analyses || []);
+        setSourceStats(cached.sourceStats || {});
+        setLastCrawlTime(cached.lastCrawlTime || null);
+        setMonitoringSourceStatus(buildMonitoringStatus(cached.sourceStats || {}));
+        setIsInitialLoading(false);
+      }
+
       addLog('Loading existing data...');
-      const response = await fetch('/api/data');
+      const response = await apiFetch('/api/data');
       const data = await response.json();
       
       if (data.success) {
@@ -322,22 +405,17 @@ export default function Home(): React.ReactElement {
         if (data.data.latestCrawlTime) {
           setLastCrawlTime(data.data.latestCrawlTime);
         }
+        updateCache({
+          crawlResults: data.data.crawlResults,
+          analyses: data.data.analyses,
+          sourceStats: data.data.sourceStats,
+          lastCrawlTime: data.data.latestCrawlTime
+        });
+        setDataLoadError(null);
         addLog(`Loaded ${data.data.totalArticles} articles and ${data.data.totalAnalyses} analyses`);
 
         // Initialize monitoring source status based on sourceStats
-        const sourceStatusList: SourceStatus[] = [
-          { name: 'openai', displayName: 'OpenAI', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['OpenAI Blog'] || 0 },
-          { name: 'deepmind', displayName: 'DeepMind', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['DeepMind Research'] || 0 },
-          { name: 'anthropic', displayName: 'Anthropic', type: 'research_lab', status: 'active', articleCount: data.data.sourceStats['Anthropic Blog'] || 0 },
-          { name: 'microsoft', displayName: 'Microsoft AI', type: 'corporate', status: 'active', articleCount: data.data.sourceStats['Microsoft AI Blog'] || 0 },
-          { name: 'arxiv', displayName: 'arXiv AI', type: 'academic', status: 'active', articleCount: data.data.sourceStats['arXiv AI'] || 0 },
-          { name: 'techcrunch', displayName: 'TechCrunch', type: 'news', status: 'active', articleCount: data.data.sourceStats['TechCrunch AI'] || 0 },
-          { name: 'venturebeat', displayName: 'VentureBeat', type: 'news', status: 'active', articleCount: data.data.sourceStats['VentureBeat AI'] || 0 },
-          { name: 'arc_official', displayName: 'ARC Prize Leaderboard', type: 'benchmark', status: 'active', lastCheck: new Date().toISOString() },
-          { name: 'arc_kaggle', displayName: 'Kaggle ARC-AGI-2', type: 'kaggle', status: 'active', lastCheck: new Date().toISOString() },
-          { name: 'arc_github', displayName: 'ARC-AGI-2 GitHub', type: 'github', status: 'active', lastCheck: new Date().toISOString() },
-        ];
-        setMonitoringSourceStatus(sourceStatusList);
+        setMonitoringSourceStatus(buildMonitoringStatus(data.data.sourceStats));
 
         // Set default ARC progress data, then fetch real data
         setArcProgressData({
@@ -358,9 +436,16 @@ export default function Home(): React.ReactElement {
           addLog(`Found ${unanalyzedCount} unanalyzed articles. Starting analysis...`);
           setTimeout(() => analyzeData(), 2000); // Small delay to let UI settle
         }
+      } else {
+        setDataLoadError(data.error || 'Failed to load persisted data');
       }
     } catch (error) {
       console.error('Failed to load existing data:', error);
+      if (!readCache()) {
+        setDataLoadError('Failed to load persisted data. Check DATABASE_URL and LOCAL_API_KEY.');
+      } else {
+        addLog('Using cached data (database unavailable).');
+      }
     } finally {
       setIsInitialLoading(false);
     }
@@ -373,15 +458,27 @@ export default function Home(): React.ReactElement {
 
   const fetchTrends = async () => {
     try {
+      const cached = readCache();
+      const cachedTrends = cached?.trends?.[trendPeriod];
+      if (cachedTrends && cachedTrends.length > 0 && trendData.length === 0) {
+        setTrendData(cachedTrends);
+      }
       addLog(`Fetching ${trendPeriod} trend data...`);
-      const response = await fetch(`/api/trends?period=${trendPeriod}`);
+      const response = await apiFetch(`/api/trends?period=${trendPeriod}`);
       const data = await response.json();
       if (data.success) {
         setTrendData(data.data.trends);
+        updateCache({ trends: { [trendPeriod]: data.data.trends } });
         addLog(`Loaded ${data.data.trends.length} trend data points`);
       }
     } catch (error) {
       console.error('Failed to fetch trends:', error);
+      const cached = readCache();
+      const cachedTrends = cached?.trends?.[trendPeriod];
+      if (cachedTrends && cachedTrends.length > 0) {
+        setTrendData(cachedTrends);
+        addLog(`Loaded ${cachedTrends.length} cached trend data points`);
+      }
     }
   };
 
@@ -389,7 +486,7 @@ export default function Home(): React.ReactElement {
   const fetchARCProgress = async () => {
     try {
       addLog('Fetching ARC-AGI progress data...');
-      const response = await fetch('/api/arc');
+      const response = await apiFetch('/api/arc');
       const data = await response.json();
       if (data.success && data.data) {
         const progress = data.data.progress || data.data;
@@ -426,7 +523,7 @@ export default function Home(): React.ReactElement {
     setValidatingId(analysisId);
     addLog(`Running cross-validation for analysis ${analysisId}...`);
     try {
-      const response = await fetch('/api/validate', {
+      const response = await apiFetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ analysisId })
@@ -594,6 +691,17 @@ export default function Home(): React.ReactElement {
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg animate-fade-in">
             <p className="text-red-700 text-sm">{error}</p>
+          </div>
+        )}
+        {dataLoadError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg animate-fade-in">
+            <p className="text-red-700 text-sm">
+              {dataLoadError.includes('LOCAL_API_KEY')
+                ? '401: LOCAL_API_KEY not configured. Set LOCAL_API_KEY and NEXT_PUBLIC_LOCAL_API_KEY, then restart the dev server.'
+                : dataLoadError.includes('Database') || dataLoadError.includes('DATABASE_URL')
+                  ? 'DB not configured: Check DATABASE_URL and restart the dev server.'
+                  : dataLoadError}
+            </p>
           </div>
         )}
 
@@ -805,6 +913,21 @@ export default function Home(): React.ReactElement {
                     <div className="flex-1">
                       <h3 className="font-semibold text-[var(--foreground)] mb-2">{result.title}</h3>
                       <p className="text-sm text-[var(--muted)] mb-3 line-clamp-2">{result.content}</p>
+                      {result.metadata?.evidence?.snippets && result.metadata.evidence.snippets.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-xs text-[var(--muted)] mb-1">Evidence</div>
+                          <div className="space-y-1">
+                            {result.metadata.evidence.snippets.slice(0, 2).map((snippet, idx) => (
+                              <div key={idx} className="text-xs text-[var(--foreground)] bg-[var(--surface-hover)] rounded px-2 py-1">
+                                “{snippet}”
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-[10px] text-[var(--muted)] mt-1">
+                            Source: {new URL(result.metadata.canonicalUrl || result.url).hostname}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex items-center space-x-4 text-xs text-[var(--muted)]">
                         <span>{result.metadata.source}</span>
                         <span>•</span>
@@ -872,6 +995,11 @@ export default function Home(): React.ReactElement {
                       <div className="text-sm text-[var(--muted)]">
                         Confidence: {(analysis.confidence * 100).toFixed(0)}%
                       </div>
+                      {typeof analysis.modelScore === 'number' && typeof analysis.heuristicScore === 'number' && (
+                        <div className="text-xs text-[var(--muted)]">
+                          Model: {(analysis.modelScore * 100).toFixed(0)}% · Heuristic: {(analysis.heuristicScore * 100).toFixed(0)}%
+                        </div>
+                      )}
                       {analysis.severity && (
                         <span className={`text-xs font-medium px-2 py-1 rounded ${
                           analysis.severity === 'critical' ? 'bg-red-50 text-red-600' :
@@ -948,6 +1076,37 @@ export default function Home(): React.ReactElement {
                       >
                         View source: {new URL(analysis.crawl.url).hostname}
                       </a>
+                    </div>
+                  )}
+
+                  {(analysis.crawl?.metadata?.evidence?.snippets?.length || 0) > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-[var(--foreground)] mb-2">Evidence</h4>
+                      <div className="space-y-2">
+                        {(analysis.crawl?.metadata?.evidence?.snippets || []).slice(0, 3).map((snippet, idx) => (
+                          <div key={idx} className="text-xs text-[var(--foreground)] bg-[var(--surface-hover)] rounded px-3 py-2">
+                            “{snippet}”
+                          </div>
+                        ))}
+                      </div>
+                      {analysis.crawl?.url && (
+                        <div className="text-[10px] text-[var(--muted)] mt-1">
+                          Source: {new URL(analysis.crawl.metadata?.canonicalUrl || analysis.crawl.url).hostname}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(analysis.crawl?.metadata?.evidence?.claims?.length || 0) > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-[var(--foreground)] mb-2">Structured Claims</h4>
+                      <div className="space-y-1">
+                        {(analysis.crawl?.metadata?.evidence?.claims || []).slice(0, 3).map((claim, idx) => (
+                          <div key={idx} className="text-xs text-[var(--muted)]">
+                            {formatClaim({ ...claim, claim: claim.claim })}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   
@@ -1030,7 +1189,7 @@ export default function Home(): React.ReactElement {
                   </div>
                 </div>
                 <div>
-                  <div className="text-sm text-[var(--muted)] mb-2">7-Day Average</div>
+                  <div className="text-sm text-[var(--muted)] mb-2">Recent Average (last 7 analyses)</div>
                   <div className="text-2xl font-bold text-[var(--foreground)]">
                     {trendData.slice(0, 7).length > 0
                       ? (trendData.slice(0, 7).reduce((sum, d) => sum + (d.avgScore || 0), 0) / trendData.slice(0, 7).length * 100).toFixed(1)
@@ -1038,7 +1197,7 @@ export default function Home(): React.ReactElement {
                   </div>
                 </div>
                 <div>
-                  <div className="text-sm text-[var(--muted)] mb-2">Alert Frequency</div>
+                  <div className="text-sm text-[var(--muted)] mb-2">Alerts in window</div>
                   <div className="text-2xl font-bold text-[var(--foreground)]">
                     {trendData.reduce((sum, d) => sum + (d.criticalAlerts || 0), 0)} / {trendPeriod}
                   </div>
