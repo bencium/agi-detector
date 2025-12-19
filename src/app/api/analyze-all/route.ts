@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }, { status: 503 });
   }
 
-  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 1, keyPrefix: 'analyze-all' });
+  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'analyze-all' });
   if (limited) return limited;
 
   try {

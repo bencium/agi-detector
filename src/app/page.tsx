@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TrendChart from '@/components/TrendChart';
 import ConsoleOutput from '@/components/ConsoleOutput';
 import { useConsoleCapture } from '@/hooks/useConsoleCapture';
@@ -196,14 +196,16 @@ export default function Home(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
   const [totalArticles, setTotalArticles] = useState(0);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
+  const analyzeCooldownRef = useRef(0);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [trendStats, setTrendStats] = useState<any | null>(null);
   const [trendMeta, setTrendMeta] = useState<any | null>(null);
   const [correlations, setCorrelations] = useState<any[]>([]);
-  const [correlationsWindowDays] = useState<number>(30);
+  const [correlationsWindowDays, setCorrelationsWindowDays] = useState<number>(30);
   const [insights, setInsights] = useState<any[]>([]);
-  const [insightsWindowDays] = useState<number>(90);
+  const [insightsWindowDays, setInsightsWindowDays] = useState<number>(90);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
@@ -261,6 +263,17 @@ export default function Home(): React.ReactElement {
   };
 
   const analyzeData = async () => {
+    const now = Date.now();
+    if (isLoading || jobProgress?.status === 'running') {
+      addLog('Analysis already in progress.');
+      return;
+    }
+    if (now < analyzeCooldownRef.current) {
+      const seconds = Math.ceil((analyzeCooldownRef.current - now) / 1000);
+      addLog(`Rate limited. Try again in ${seconds}s.`);
+      return;
+    }
+
     setIsLoading(true);
     setTotalAnalyzed(0);
     setJobProgress(null);
@@ -270,6 +283,14 @@ export default function Home(): React.ReactElement {
       const response = await apiFetch('/api/analyze-all', { method: 'POST' });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After');
+          const retrySeconds = retryAfter ? parseInt(retryAfter, 10) : 60;
+          analyzeCooldownRef.current = Date.now() + retrySeconds * 1000;
+          addLog(`❌ Rate limited. Retry after ${retrySeconds}s.`);
+          setIsLoading(false);
+          return;
+        }
         throw new Error(`Analysis failed: ${response.status} ${response.statusText}`);
       }
 
@@ -529,7 +550,7 @@ export default function Home(): React.ReactElement {
 
         // Automatically analyze unanalyzed articles
         const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
-        if (unanalyzedCount > 0) {
+        if (unanalyzedCount > 0 && !isLoading && !jobProgress?.status) {
           addLog(`Found ${unanalyzedCount} unanalyzed articles. Starting analysis...`);
           setTimeout(() => analyzeData(), 2000); // Small delay to let UI settle
         }
@@ -581,24 +602,35 @@ export default function Home(): React.ReactElement {
     }
   };
 
-  const fetchCorrelations = async () => {
+  const fetchCorrelations = async (days = correlationsWindowDays, allowExpand = true) => {
     try {
-      const response = await apiFetch(`/api/correlations?days=${correlationsWindowDays}&limit=10`);
+      const response = await apiFetch(`/api/correlations?days=${days}&limit=10`);
       const data = await response.json();
       if (data.success) {
-        setCorrelations(data.data.findings || []);
+        const findings = data.data.findings || [];
+        setCorrelations(findings);
+        if (allowExpand && findings.length === 0 && days < 180) {
+          setCorrelationsWindowDays(180);
+          return fetchCorrelations(180, false);
+        }
       }
     } catch (error) {
       console.warn('Failed to fetch correlations:', error);
     }
   };
 
-  const fetchInsights = async (force = false) => {
+  const fetchInsights = async (force = false, days = insightsWindowDays, allowExpand = true) => {
     try {
-      const response = await apiFetch(`/api/insights?days=${insightsWindowDays}&limit=5${force ? '&refresh=true' : ''}`);
+      const response = await apiFetch(`/api/insights?days=${days}&limit=5${force ? '&refresh=true' : ''}`);
       const data = await response.json();
       if (data.success) {
-        setInsights(data.data.insights || []);
+        const nextInsights = data.data.insights || [];
+        setInsights(nextInsights);
+        setInsightsError(data.data.error || null);
+        if (allowExpand && nextInsights.length === 0 && days < 180) {
+          setInsightsWindowDays(180);
+          return fetchInsights(force, 180, false);
+        }
       }
     } catch (error) {
       console.warn('Failed to fetch insights:', error);
@@ -1046,11 +1078,11 @@ export default function Home(): React.ReactElement {
                 </button>
               </div>
 
-              {correlations.length === 0 ? (
-                <div className="text-sm text-[var(--muted)] text-center py-6">
-                  No cross-source correlations yet.
-                </div>
-              ) : (
+                  {correlations.length === 0 ? (
+                    <div className="text-sm text-[var(--muted)] text-center py-6">
+                  No cross-source correlations found in the last {correlationsWindowDays} days.
+                    </div>
+                  ) : (
                 <div className="space-y-3">
                   {correlations.map((item, idx) => (
                     <div key={item.id || idx} className="p-4 rounded-lg bg-[var(--surface-hover)] border border-[var(--border)]">
@@ -1116,7 +1148,9 @@ export default function Home(): React.ReactElement {
 
               {insights.length === 0 ? (
                 <div className="text-sm text-[var(--muted)] text-center py-6">
-                  No insights yet. Run a crawl + analysis, then refresh.
+                  {insightsError
+                    ? `Insights error: ${insightsError}`
+                    : `No insights found in the last ${insightsWindowDays} days.`}
                 </div>
               ) : (
                 <div className="space-y-3">
