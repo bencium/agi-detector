@@ -603,9 +603,9 @@ export default function Home(): React.ReactElement {
       const response = await apiFetch(`/api/correlations?days=${days}&limit=10`);
       const data = await response.json();
       if (data.success) {
-        const findings = data.data.findings || [];
-        setCorrelations(findings);
-        if (allowExpand && findings.length === 0 && days < 30) {
+        const found = data.data.correlations || [];
+        setCorrelations(found);
+        if (allowExpand && found.length === 0 && days < 30) {
           setCorrelationsWindowDays(30);
           return fetchCorrelations(30, false);
         }
@@ -1066,128 +1066,164 @@ export default function Home(): React.ReactElement {
               onRefresh={loadExistingData}
             />
 
-            {/* Interesting Correlations */}
-            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-[var(--foreground)]">Interesting Correlations</h3>
-                  <p className="text-xs text-[var(--muted)] mt-1">
-                    Co-occurring indicators with benchmark deltas across sources (last {correlationsWindowDays} days)
-                  </p>
+            {/* Semantic Correlations */}
+            <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[var(--accent-cyan)]" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--foreground)]">
+                    Correlations
+                  </h3>
+                  <span className="text-xs text-[var(--muted)]">{correlationsWindowDays}d</span>
                 </div>
                 <button
-                  onClick={fetchCorrelations}
-                  className="text-xs px-3 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-hover)]"
+                  onClick={() => fetchCorrelations()}
+                  className="text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
                 >
                   Refresh
                 </button>
               </div>
 
-                  {correlations.length === 0 ? (
-                    <div className="text-sm text-[var(--muted)] text-center py-6">
-                  No cross-source correlations found in the last {correlationsWindowDays} days.
-                    </div>
-                  ) : (
-                <div className="space-y-3">
-                  {correlations.map((item, idx) => (
-                    <div key={item.id || idx} className="p-4 rounded-lg bg-[var(--surface-hover)] border border-[var(--border)]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--foreground)]">{item.indicator}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--surface)] text-[var(--foreground)] border border-[var(--border)]">
-                          {item.benchmark}{item.metric ? ` · ${item.metric}` : ''}
-                        </span>
-                        <span className="text-xs text-[var(--muted)]">
-                          Δ avg {typeof item.avgDelta === 'number' ? item.avgDelta.toFixed(2) : '—'}
-                        </span>
-                        <span className="text-xs text-[var(--muted)]">
-                          Δ max {typeof item.maxDelta === 'number' ? item.maxDelta.toFixed(2) : '—'}
-                        </span>
-                        <span className="text-xs text-[var(--muted)]">
-                          {item.sourceCount} sources · {item.analysisCount} analyses
-                        </span>
+              {correlations.length === 0 ? (
+                <div className="px-6 py-12 text-center">
+                  <p className="text-sm text-[var(--muted)]">No correlations detected</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--border)]">
+                  {correlations.map((item, idx) => {
+                    const confidence = typeof item.confidence === 'number' ? item.confidence : 0.5;
+                    const typeColors: Record<string, string> = {
+                      thematic_cluster: 'bg-[var(--accent-cyan)]',
+                      contradicting_narratives: 'bg-[var(--danger)]',
+                      timing_pattern: 'bg-[var(--warning)]',
+                      coordinated_announcement: 'bg-[var(--success)]',
+                      capability_signal: 'bg-[var(--accent)]',
+                    };
+                    const typeColor = typeColors[item.correlationType] || 'bg-[var(--muted)]';
+
+                    return (
+                      <div key={item.id || idx} className="px-6 py-4 hover:bg-[var(--surface-hover)] transition-colors">
+                        {/* Top row: Type indicator + Title + Confidence */}
+                        <div className="flex items-start gap-3">
+                          <div className={`w-1 h-full min-h-[40px] rounded-full ${typeColor} flex-shrink-0`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-4 mb-1">
+                              <h4 className="text-sm font-semibold text-[var(--foreground)] truncate">
+                                {item.title}
+                              </h4>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="w-16 h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-[var(--foreground)]"
+                                    style={{ width: `${confidence * 100}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs tabular-nums text-[var(--muted)]">
+                                  {Math.round(confidence * 100)}%
+                                </span>
+                              </div>
+                            </div>
+                            {/* Type label */}
+                            <span className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-medium">
+                              {item.correlationType?.replace(/_/g, ' ') || 'pattern'}
+                            </span>
+                            {/* Summary */}
+                            {item.summary && (
+                              <p className="text-sm text-[var(--muted)] mt-2 leading-relaxed line-clamp-2">
+                                {item.summary}
+                              </p>
+                            )}
+                            {/* Sources */}
+                            {Array.isArray(item.sources) && item.sources.length > 0 && (
+                              <div className="flex items-center gap-1 mt-3 text-xs text-[var(--muted)]">
+                                <span className="font-medium">{item.sources.length}</span>
+                                <span>sources:</span>
+                                <span className="truncate">{item.sources.join(' · ')}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      {Array.isArray(item.sources) && item.sources.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {item.sources.slice(0, 6).map((source: string) => (
-                            <span key={source} className="text-xs px-2 py-0.5 rounded-full bg-white/70 text-[var(--muted)] border border-[var(--border)]">
-                              {source}
-                            </span>
-                          ))}
-                          {item.sources.length > 6 && (
-                            <span className="text-xs text-[var(--muted)]">+{item.sources.length - 6} more</span>
-                          )}
-                        </div>
-                      )}
-                      {Array.isArray(item.urls) && item.urls.length > 0 && (
-                        <div className="mt-2 text-xs text-[var(--muted)]">
-                          Sources: {item.urls.slice(0, 2).map((url: string) => (
-                            <span key={url} className="mr-2">
-                              {url}
-                            </span>
-                          ))}
-                          {item.urls.length > 2 && <span>…</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
 
             {/* LLM Insights */}
-            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-[var(--foreground)]">LLM Insights</h3>
-                  <p className="text-xs text-[var(--muted)] mt-1">
-                    Natural-language synthesis across sources (last {insightsWindowDays} days)
-                  </p>
+            <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[var(--accent)]" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--foreground)]">
+                    Insights
+                  </h3>
+                  <span className="text-xs text-[var(--muted)]">{insightsWindowDays}d</span>
                 </div>
                 <button
                   onClick={() => fetchInsights(true)}
-                  className="text-xs px-3 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-hover)]"
+                  className="text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
                 >
                   Refresh
                 </button>
               </div>
 
               {insights.length === 0 ? (
-                <div className="text-sm text-[var(--muted)] text-center py-6">
-                  {insightsError
-                    ? `Insights error: ${insightsError}`
-                    : `No insights found in the last ${insightsWindowDays} days.`}
+                <div className="px-6 py-12 text-center">
+                  <p className="text-sm text-[var(--muted)]">
+                    {insightsError || 'No insights generated'}
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {insights.map((item, idx) => (
-                    <div key={item.id || idx} className="p-4 rounded-lg bg-[var(--surface-hover)] border border-[var(--border)]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--foreground)]">{item.title}</span>
-                        <span className="text-xs text-[var(--muted)]">
-                          {(typeof item.confidence === 'number' ? item.confidence : 0.5) * 100}% confidence
-                        </span>
-                      </div>
-                      <p className="text-sm text-[var(--muted)] mt-2">{item.summary}</p>
-                      {Array.isArray(item.sources) && item.sources.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {item.sources.slice(0, 6).map((source: string) => (
-                            <span key={source} className="text-xs px-2 py-0.5 rounded-full bg-white/70 text-[var(--muted)] border border-[var(--border)]">
-                              {source}
+                <div className="divide-y divide-[var(--border)]">
+                  {insights.map((item, idx) => {
+                    const confidence = typeof item.confidence === 'number' ? item.confidence : 0.5;
+
+                    return (
+                      <div key={item.id || idx} className="px-6 py-4 hover:bg-[var(--surface-hover)] transition-colors">
+                        <div className="flex items-start gap-3">
+                          {/* Confidence indicator */}
+                          <div className="flex flex-col items-center gap-1 pt-0.5 flex-shrink-0">
+                            <span className="text-xs font-semibold tabular-nums text-[var(--foreground)]">
+                              {Math.round(confidence * 100)}
                             </span>
-                          ))}
-                          {item.sources.length > 6 && (
-                            <span className="text-xs text-[var(--muted)]">+{item.sources.length - 6} more</span>
-                          )}
+                            <div className="w-1 h-8 rounded-full bg-[var(--border)] overflow-hidden">
+                              <div
+                                className="w-full rounded-full bg-[var(--accent)]"
+                                style={{ height: `${confidence * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {/* Title */}
+                            <h4 className="text-sm font-semibold text-[var(--foreground)] leading-snug">
+                              {item.title}
+                            </h4>
+                            {/* Summary */}
+                            <p className="text-sm text-[var(--muted)] mt-1.5 leading-relaxed line-clamp-3">
+                              {item.summary}
+                            </p>
+                            {/* Sources inline */}
+                            {Array.isArray(item.sources) && item.sources.length > 0 && (
+                              <div className="flex items-center gap-1 mt-3 text-xs text-[var(--muted)]">
+                                <span className="font-medium">{item.sources.length}</span>
+                                <span>sources:</span>
+                                <span className="truncate">{item.sources.join(' · ')}</span>
+                              </div>
+                            )}
+                            {/* Evidence snippets */}
+                            {Array.isArray(item.evidenceSnippets) && item.evidenceSnippets.length > 0 && (
+                              <div className="mt-2 text-xs text-[var(--muted)] italic line-clamp-1">
+                                "{item.evidenceSnippets[0]}"
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      {Array.isArray(item.urls) && item.urls.length > 0 && (
-                        <div className="mt-2 text-xs text-[var(--muted)]">
-                          Sources: {item.urls.slice(0, 2).join(' · ')}
-                          {item.urls.length > 2 && ' …'}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
