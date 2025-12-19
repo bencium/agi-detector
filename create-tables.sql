@@ -95,6 +95,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS "InsightFinding_window_title_key"
 CREATE INDEX IF NOT EXISTS "InsightFinding_updatedAt_idx"
   ON "InsightFinding"("updatedAt");
 
+-- Analyze-all job tracking
+CREATE TABLE IF NOT EXISTS "AnalysisJob" (
+    id TEXT NOT NULL DEFAULT gen_random_uuid(),
+    status TEXT NOT NULL,
+    "totalArticles" INTEGER NOT NULL DEFAULT 0,
+    "processedArticles" INTEGER NOT NULL DEFAULT 0,
+    "successfulAnalyses" INTEGER NOT NULL DEFAULT 0,
+    "failedAnalyses" INTEGER NOT NULL DEFAULT 0,
+    "currentArticle" TEXT,
+    "avgBatchTime" DOUBLE PRECISION,
+    "estimatedTimeRemaining" DOUBLE PRECISION,
+    error TEXT,
+    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completedAt" TIMESTAMP(3),
+    CONSTRAINT "AnalysisJob_pkey" PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS "AnalysisJob_startedAt_idx"
+  ON "AnalysisJob"("startedAt");
+
 -- Evidence claims table
 CREATE TABLE IF NOT EXISTS "EvidenceClaim" (
     id TEXT NOT NULL DEFAULT gen_random_uuid(),

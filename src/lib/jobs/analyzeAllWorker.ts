@@ -45,6 +45,38 @@ interface AnalysisRecord {
   indicators: string[];
 }
 
+let analysisJobSchemaEnsured = false;
+
+export async function ensureAnalysisJobSchema(): Promise<void> {
+  if (analysisJobSchemaEnsured) return;
+  try {
+    await execute(`
+      CREATE TABLE IF NOT EXISTS "AnalysisJob" (
+        id TEXT NOT NULL DEFAULT gen_random_uuid(),
+        status TEXT NOT NULL,
+        "totalArticles" INTEGER NOT NULL DEFAULT 0,
+        "processedArticles" INTEGER NOT NULL DEFAULT 0,
+        "successfulAnalyses" INTEGER NOT NULL DEFAULT 0,
+        "failedAnalyses" INTEGER NOT NULL DEFAULT 0,
+        "currentArticle" TEXT,
+        "avgBatchTime" DOUBLE PRECISION,
+        "estimatedTimeRemaining" DOUBLE PRECISION,
+        error TEXT,
+        "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "completedAt" TIMESTAMP(3),
+        CONSTRAINT "AnalysisJob_pkey" PRIMARY KEY (id)
+      )
+    `);
+    await execute(`
+      CREATE INDEX IF NOT EXISTS "AnalysisJob_startedAt_idx"
+      ON "AnalysisJob"("startedAt")
+    `);
+    analysisJobSchemaEnsured = true;
+  } catch (error) {
+    console.warn('[AnalysisJob] Failed to ensure schema:', error);
+  }
+}
+
 // Tunables via env
 const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '15000', 10);
 const ANALYZE_BATCH_SIZE = Math.max(1, parseInt(process.env.ANALYZE_BATCH_SIZE || '2', 10));
@@ -580,6 +612,7 @@ export async function runAnalyzeAllJob(jobId: string): Promise<void> {
 }
 
 export async function createAnalyzeAllJob(totalArticles = 0): Promise<AnalysisJob | null> {
+  await ensureAnalysisJobSchema();
   return insert<AnalysisJob>(
     `INSERT INTO "AnalysisJob" (id, status, "totalArticles", "processedArticles")
      VALUES (gen_random_uuid(), 'queued', $1, 0)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, isDbEnabled } from '@/lib/db';
+import { ensureAnalysisJobSchema } from '@/lib/jobs/analyzeAllWorker';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
   const jobId = searchParams.get('jobId');
 
   try {
+    await ensureAnalysisJobSchema();
     let job: AnalysisJob | null;
 
     if (jobId) {

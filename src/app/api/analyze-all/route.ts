@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, isDbEnabled } from '@/lib/db';
-import { createAnalyzeAllJob } from '@/lib/jobs/analyzeAllWorker';
+import { createAnalyzeAllJob, ensureAnalysisJobSchema } from '@/lib/jobs/analyzeAllWorker';
 import { enqueueAnalyzeAllJob } from '@/lib/jobs/analyzeAllQueue';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
 
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await ensureAnalysisJobSchema();
     const remaining = await query<{ count: string }>(
       `SELECT COUNT(*) as count
        FROM "CrawlResult" cr
