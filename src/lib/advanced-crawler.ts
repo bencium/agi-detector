@@ -309,17 +309,46 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
     });
     
     console.log(`[Browser] Navigating to ${url}`);
-    await page.goto(url, { 
+    await page.goto(url, {
       waitUntil: 'networkidle',
-      timeout: 30000 
+      timeout: 30000
     });
-    
+
+    // Wait for actual content to render (SPAs need time to hydrate)
+    try {
+      await page.waitForFunction(
+        () => document.body.innerText.length > 200,
+        { timeout: 10000 }
+      );
+      console.log(`[Browser] Content rendered for ${url}`);
+    } catch {
+      console.warn(`[Browser] Content may not be fully rendered for ${url}`);
+    }
+
     // Random delay to appear more human
     await delay(getRandomDelay());
     
     if (selectors.autoDiscover) {
       const html = await page.content();
-      return discoverArticlesFromHtml(html, url, selectors as AutoDiscoverConfig);
+      console.log(`[Browser] Received ${html.length} bytes from ${url}`);
+      if (html.length < 1000) {
+        console.warn(`[Browser] Suspiciously small HTML (${html.length} bytes) - page may not have rendered`);
+      }
+      const discovered = discoverArticlesFromHtml(html, url, selectors as AutoDiscoverConfig);
+
+      // Debug: save screenshot if no articles found
+      if (discovered.length === 0) {
+        const safeName = (selectors.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '-');
+        const screenshotPath = `/tmp/debug-${safeName}-${Date.now()}.png`;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+          console.log(`[Browser] Debug screenshot saved: ${screenshotPath}`);
+        } catch (e) {
+          console.warn(`[Browser] Failed to save screenshot: ${e}`);
+        }
+      }
+
+      return discovered;
     }
 
     // Extract articles
@@ -380,6 +409,9 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
 }
 
 function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDiscoverConfig): CrawledArticle[] {
+  const sourceName = config.name || 'Unknown';
+  console.log(`[AutoDiscover] Starting discovery for ${sourceName} (${baseUrl})`);
+
   const $ = cheerio.load(html);
   const candidates: CrawledArticle[] = [];
   const dateRegex = /(\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?)/;
@@ -420,8 +452,10 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
   }
 
   let results = Array.from(deduped.values()).slice(0, 20);
+  console.log(`[AutoDiscover] Pass 1 (article/li/div): ${results.length} candidates from ${sourceName}`);
 
   if (results.length === 0) {
+    console.log(`[AutoDiscover] Pass 1 empty, trying Pass 2 (keyword anchors)...`);
     const baseHost = new URL(baseUrl).host;
     const anchorCandidates: CrawledArticle[] = [];
     const anchorSelector = 'main a[href], section a[href], article a[href], a[href]';
@@ -455,6 +489,8 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
       }
     });
 
+    console.log(`[AutoDiscover] Pass 2 (keyword anchors): ${anchorCandidates.length} candidates`);
+
     if (anchorCandidates.length > 0) {
       const dedupedAnchors = new Map<string, CrawledArticle>();
       for (const candidate of anchorCandidates) {
@@ -462,9 +498,11 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
         if (!dedupedAnchors.has(key)) dedupedAnchors.set(key, candidate);
       }
       results = Array.from(dedupedAnchors.values()).slice(0, 20);
+      console.log(`[AutoDiscover] Final: ${results.length} articles from ${sourceName} (Pass 2)`);
       return results;
     }
 
+    console.log(`[AutoDiscover] Pass 2 empty, trying Pass 3 (all anchors with keywords)...`);
     $('a[href]').each((_, element) => {
       const $link = $(element);
       const href = $link.attr('href') || '';
@@ -496,8 +534,10 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
       if (!fallbackDeduped.has(key)) fallbackDeduped.set(key, candidate);
     }
     results = Array.from(fallbackDeduped.values()).slice(0, 20);
+    console.log(`[AutoDiscover] Pass 3 (all keyword anchors): ${results.length} candidates`);
 
     if (results.length === 0) {
+      console.log(`[AutoDiscover] Pass 3 empty, trying Pass 4 (minimal path-depth anchors)...`);
       const minimalAnchors: CrawledArticle[] = [];
       $('a[href]').each((_, element) => {
         const $link = $(element);
@@ -533,9 +573,14 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
         if (!minimalDeduped.has(key)) minimalDeduped.set(key, candidate);
       }
       results = Array.from(minimalDeduped.values()).slice(0, 10);
+      console.log(`[AutoDiscover] Pass 4 (minimal anchors): ${results.length} candidates`);
     }
   }
 
+  console.log(`[AutoDiscover] Final: ${results.length} articles from ${sourceName}`);
+  if (results.length === 0) {
+    console.warn(`[AutoDiscover] No articles found for ${sourceName} - all 4 passes failed`);
+  }
   return results;
 }
 
@@ -590,14 +635,12 @@ const API_ENDPOINTS: Record<string, string[]> = {
     'https://export.arxiv.org/rss/cs.AI'
   ],
   'Qwen GitHub Releases': [
+    'https://github.com/QwenLM/Qwen/releases.atom', // Primary: releases feed
     'https://github.com/QwenLM/Qwen/tags.atom',
-    'https://github.com/QwenLM/Qwen/commits/main.atom',
-    'https://github.com/QwenLM/Qwen/commits/master.atom'
   ],
   'Huawei Noah Research': [
+    'https://github.com/huawei-noah/noah-research/releases.atom', // Primary: releases feed
     'https://github.com/huawei-noah/noah-research/tags.atom',
-    'https://github.com/huawei-noah/noah-research/commits/main.atom',
-    'https://github.com/huawei-noah/noah-research/commits/master.atom'
   ],
   'ModelScope Releases': [
     'https://github.com/modelscope/modelscope/releases.atom'

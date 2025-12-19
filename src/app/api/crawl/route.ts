@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         const existing = await query<{ id: string }>(
           `SELECT id FROM "CrawlResult"
            WHERE url = $1
-              OR ( $2 IS NOT NULL AND metadata->>'contentHash' = $2 )
+              OR ( $2::text IS NOT NULL AND metadata->>'contentHash' = $2::text )
            LIMIT 1`,
           [result.url, contentHash || null]
         );
