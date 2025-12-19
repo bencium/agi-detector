@@ -207,6 +207,7 @@ export default function Home(): React.ReactElement {
   const [insights, setInsights] = useState<any[]>([]);
   const [insightsWindowDays, setInsightsWindowDays] = useState<number>(90);
   const [insightsError, setInsightsError] = useState<string | null>(null);
+  const autoInsightsRefreshRef = useRef(false);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
@@ -549,18 +550,7 @@ export default function Home(): React.ReactElement {
         // Fetch LLM insights in background
         fetchInsights();
 
-        // Automatically analyze unanalyzed articles (only once per page load)
-        const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
-        if (
-          unanalyzedCount > 0 &&
-          !autoAnalyzeTriggeredRef.current &&
-          !isLoading &&
-          !jobProgress?.status
-        ) {
-          autoAnalyzeTriggeredRef.current = true;
-          addLog(`Found ${unanalyzedCount} unanalyzed articles. Starting analysis...`);
-          setTimeout(() => analyzeData(), 2000); // Small delay to let UI settle
-        }
+        // Auto-analysis disabled: only run when user clicks "Run Manual Scan"
       } else {
         setDataLoadError(data.error || 'Failed to load persisted data');
       }
@@ -641,6 +631,10 @@ export default function Home(): React.ReactElement {
       if (allowExpand && nextInsights.length === 0 && days < 180) {
         setInsightsWindowDays(180);
         return fetchInsights(force, 180, false);
+      }
+      if (!force && !autoInsightsRefreshRef.current && nextInsights.length === 0 && !data.data.error) {
+        autoInsightsRefreshRef.current = true;
+        return fetchInsights(true, days, false);
       }
     } catch (error) {
       console.warn('Failed to fetch insights:', error);

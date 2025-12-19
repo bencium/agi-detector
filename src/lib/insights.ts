@@ -82,9 +82,13 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
   for (const row of rows) {
     const metadata = row.metadata as Record<string, any> | null;
     const source = (metadata?.source as string) || 'Unknown';
+    const content = row.content || '';
     const snippets = Array.isArray(metadata?.evidence?.snippets)
       ? (metadata?.evidence?.snippets as string[]).slice(0, 3)
-      : buildEvidence(row.content).snippets.slice(0, 3);
+      : buildEvidence(content).snippets.slice(0, 3);
+    if (snippets.length === 0 && !content.trim()) {
+      continue;
+    }
     const entry: SourceSnippet = {
       source,
       title: row.title,
