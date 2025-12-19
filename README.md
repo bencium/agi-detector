@@ -6,6 +6,10 @@
 
 An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news.
 
+## ✨ Recent Improvements
+- **Evidence-gated severity**: Critical alerts now require real benchmark deltas (reduces false positives).
+- **Smarter anomalies**: Anomaly detection clusters by source type and filters out low-AGI-score noise.
+
 ## 🎯 Project Vision
 
 A sophisticated early-warning system that monitors the AI landscape for genuine indicators of AGI development, distinguishing between normal AI progress and potentially groundbreaking developments that could signal the emergence of AGI.
