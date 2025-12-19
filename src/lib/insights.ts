@@ -66,8 +66,9 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
     url: string;
     timestamp: Date;
     metadata: Record<string, unknown> | null;
+    content: string;
   }>(`
-    SELECT id, title, url, timestamp, metadata
+    SELECT id, title, url, timestamp, metadata, content
     FROM "CrawlResult"
     WHERE timestamp >= NOW() - ($1 || ' days')::interval
     ORDER BY timestamp DESC
@@ -104,14 +105,18 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
     }
   }
 
-  const sourcesPayload = Array.from(bySource.entries()).flatMap(([_, entries]) => entries);
+  const maxPerSource = 2;
+  const maxSources = 30;
+  const sourcesPayload = Array.from(bySource.entries())
+    .flatMap(([_, entries]) => entries.slice(0, maxPerSource))
+    .slice(0, maxSources);
   if (sourcesPayload.length === 0) {
     return [];
   }
 
   const model = process.env.INSIGHTS_MODEL || process.env.OPENAI_MODEL || 'gpt-5-mini';
   const prompt = `
-You are given excerpts from multiple sources. Identify 3-5 cross-source correlations or themes.
+You are given excerpts from multiple sources. Identify at least 2 cross-source correlations or themes.
 Only use the provided sources. Do not invent facts or sources.
 Return strict JSON array with items:
 {
@@ -129,7 +134,7 @@ ${idx + 1}. [${s.source}] ${s.title}
 URL: ${s.url}
 Time: ${s.timestamp}
 Snippets:
-${s.snippets.map((snip) => `- ${snip}`).join('\n')}
+${s.snippets.map((snip) => `- ${snip.slice(0, 240)}`).join('\n')}
 `).join('\n')}
 `.trim();
 
@@ -162,6 +167,10 @@ ${s.snippets.map((snip) => `- ${snip}`).join('\n')}
   } catch {
     console.warn('[Insights] Failed to parse LLM JSON, returning empty list.');
     parsed = [];
+  }
+
+  if (parsed.length === 0) {
+    throw new Error('LLM returned no insights');
   }
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
