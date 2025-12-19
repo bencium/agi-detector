@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
     }, { status: 503 });
   }
 
-  if (process.env.NODE_ENV === 'production') {
+  const disableRateLimit = process.env.DISABLE_ANALYZE_RATE_LIMIT === 'true';
+  if (process.env.NODE_ENV === 'production' && !disableRateLimit) {
     const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'analyze-all' });
     if (limited) return limited;
   }
