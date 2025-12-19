@@ -124,6 +124,7 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
     return items.map((item: any) => {
       const title = toText(item.title?.[0]) || '';
       const content = toText(item.description?.[0]) || toText(item.summary?.[0]) || toText(item.content?.[0]) || '';
+      const safeContent = content || title;
       const url = item.link?.[0]?.$ ?.href || item.link?.[0] || item.guid?.[0] || '';
       const publishedAt = item.pubDate?.[0] || item.updated?.[0];
       const author = item.author?.[0] || item['dc:creator']?.[0] || item.creator?.[0] || '';
@@ -131,14 +132,14 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
       const metadata = buildCrawlMetadata({
         source: sourceName,
         url,
-        content: content || title,
+        content: safeContent,
         title,
         publishedAt,
         author,
         id
       });
 
-      return { title, content, url, metadata };
+      return { title, content: safeContent, url, metadata };
     }).filter((article: { title: string; content: string; url: string; metadata: object }) => article.title && article.content);
   } catch (error) {
     console.log(`[RSS] Failed to parse RSS feed: ${error}`);
@@ -382,6 +383,7 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
   const $ = cheerio.load(html);
   const candidates: CrawledArticle[] = [];
   const dateRegex = /(\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?)/;
+  const keywordRegex = /(research|publication|paper|news|blog|report|announcement|release|project|dataset|model|benchmark|论文|研究|发布|新闻|报告|模型|数据集)/i;
 
   $('article, li, div').each((_, element) => {
     const $el = $(element);
@@ -417,7 +419,44 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
     if (!deduped.has(key)) deduped.set(key, candidate);
   }
 
-  return Array.from(deduped.values()).slice(0, 20);
+  let results = Array.from(deduped.values()).slice(0, 20);
+
+  if (results.length === 0) {
+    const baseHost = new URL(baseUrl).host;
+    $('a[href]').each((_, element) => {
+      const $link = $(element);
+      const href = $link.attr('href') || '';
+      if (!href || href.startsWith('#')) return;
+      const absolute = href.startsWith('http') ? href : new URL(href, baseUrl).href;
+      if (new URL(absolute).host !== baseHost) return;
+      const rawText = $link.text().replace(/\s+/g, ' ').trim();
+      const titleAttr = $link.attr('title') || '';
+      const aria = $link.attr('aria-label') || '';
+      const label = rawText || titleAttr || aria;
+      const title = label && label.length >= 3 ? label : absolute.split('/').filter(Boolean).pop() || absolute;
+      if (!keywordRegex.test(`${title} ${absolute}`)) return;
+      candidates.push({
+        title,
+        content: title,
+        url: absolute,
+        metadata: buildCrawlMetadata({
+          source: config.name || 'Unknown',
+          url: absolute,
+          content: title,
+          title
+        })
+      });
+    });
+
+    const fallbackDeduped = new Map<string, CrawledArticle>();
+    for (const candidate of candidates) {
+      const key = candidate.url || candidate.title.toLowerCase();
+      if (!fallbackDeduped.has(key)) fallbackDeduped.set(key, candidate);
+    }
+    results = Array.from(fallbackDeduped.values()).slice(0, 20);
+  }
+
+  return results;
 }
 
 async function crawlWithBrowserWithRetries(url: string, selectors: any): Promise<CrawledArticle[]> {
