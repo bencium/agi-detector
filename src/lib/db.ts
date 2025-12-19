@@ -3,11 +3,22 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 // Connection pool (singleton)
 const globalForPg = globalThis as unknown as { pool: Pool | undefined };
 
-export const isDbEnabled = !!process.env.DATABASE_URL;
+const dbUrl = process.env.DATABASE_URL;
+const neonOnly = process.env.NEON_ONLY !== 'false';
+const dbHost = dbUrl ? (() => {
+  try {
+    return new URL(dbUrl).hostname;
+  } catch {
+    return null;
+  }
+})() : null;
+const isLocalHost = !!dbHost && ['localhost', '127.0.0.1', '::1'].includes(dbHost);
+
+export const isDbEnabled = !!dbUrl && (!neonOnly || !isLocalHost);
 
 function createPool(): Pool {
   return new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: dbUrl,
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
@@ -23,7 +34,11 @@ if (process.env.NODE_ENV !== 'production' && isDbEnabled) {
 }
 
 if (!isDbEnabled) {
-  console.warn('[DB] DATABASE_URL not set; running in no-DB mode.');
+  if (!dbUrl) {
+    console.warn('[DB] DATABASE_URL not set; running in no-DB mode.');
+  } else if (neonOnly && isLocalHost) {
+    console.warn(`[DB] NEON_ONLY enabled; refusing local DATABASE_URL host=${dbHost}`);
+  }
 }
 
 // Helper for parameterized queries

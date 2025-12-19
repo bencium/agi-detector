@@ -52,9 +52,19 @@ export async function GET() {
       success: true,
       env: {
         DATABASE_URL_set: !!process.env.DATABASE_URL,
-        DIRECT_URL_set: !!process.env.DIRECT_URL
+        DIRECT_URL_set: !!process.env.DIRECT_URL,
+        NEON_ONLY: process.env.NEON_ONLY !== 'false'
       },
-      info,
+      info: {
+        ...info,
+        envHost: (() => {
+          try {
+            return process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : null;
+          } catch {
+            return null;
+          }
+        })()
+      },
       tables: {
         CrawlResult: { ...cr, cnt: Number(cr?.cnt || 0) },
         AnalysisResult: { ...ar, cnt: Number(ar?.cnt || 0) },

@@ -1,5 +1,6 @@
 import { execute, query } from '@/lib/db';
 import { openai } from '@/lib/openai';
+import { buildEvidence } from '@/lib/evidence';
 
 type SourceSnippet = {
   source: string;
@@ -83,7 +84,7 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
     const source = (metadata?.source as string) || 'Unknown';
     const snippets = Array.isArray(metadata?.evidence?.snippets)
       ? (metadata?.evidence?.snippets as string[]).slice(0, 3)
-      : [];
+      : buildEvidence(row.content).snippets.slice(0, 3);
     const entry: SourceSnippet = {
       source,
       title: row.title,

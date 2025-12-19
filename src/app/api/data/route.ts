@@ -49,18 +49,16 @@ export async function GET() {
       LIMIT 1000
     `);
 
-    // Get source counts from metadata
+    // Get source counts from all crawl results (not just the latest 1000)
     const sourceStats: Record<string, number> = {};
-    crawlResults.forEach(result => {
-      try {
-        const metadata = result.metadata;
-        if (metadata && typeof metadata === 'object' && 'source' in metadata) {
-          const source = metadata.source as string;
-          sourceStats[source] = (sourceStats[source] || 0) + 1;
-        }
-      } catch {
-        // Skip malformed metadata
-      }
+    const sourceRows = await query<{ source: string; count: number }>(`
+      SELECT COALESCE(metadata->>'source', 'Unknown') AS source,
+             COUNT(*)::int AS count
+      FROM "CrawlResult"
+      GROUP BY COALESCE(metadata->>'source', 'Unknown')
+    `);
+    sourceRows.forEach(row => {
+      sourceStats[row.source] = row.count;
     });
 
     // Get analyses with joined crawl data

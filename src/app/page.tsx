@@ -186,7 +186,7 @@ export default function Home(): React.ReactElement {
   const [correlations, setCorrelations] = useState<any[]>([]);
   const [correlationsWindowDays] = useState<number>(30);
   const [insights, setInsights] = useState<any[]>([]);
-  const [insightsWindowDays] = useState<number>(30);
+  const [insightsWindowDays] = useState<number>(90);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
