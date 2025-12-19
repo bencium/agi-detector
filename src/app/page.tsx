@@ -203,7 +203,7 @@ export default function Home(): React.ReactElement {
   const [trendStats, setTrendStats] = useState<any | null>(null);
   const [trendMeta, setTrendMeta] = useState<any | null>(null);
   const [correlations, setCorrelations] = useState<any[]>([]);
-  const [correlationsWindowDays, setCorrelationsWindowDays] = useState<number>(30);
+  const [correlationsWindowDays, setCorrelationsWindowDays] = useState<number>(7);
   const [insights, setInsights] = useState<any[]>([]);
   const [insightsWindowDays, setInsightsWindowDays] = useState<number>(90);
   const [insightsError, setInsightsError] = useState<string | null>(null);
@@ -605,9 +605,9 @@ export default function Home(): React.ReactElement {
       if (data.success) {
         const findings = data.data.findings || [];
         setCorrelations(findings);
-        if (allowExpand && findings.length === 0 && days < 180) {
-          setCorrelationsWindowDays(180);
-          return fetchCorrelations(180, false);
+        if (allowExpand && findings.length === 0 && days < 30) {
+          setCorrelationsWindowDays(30);
+          return fetchCorrelations(30, false);
         }
       }
     } catch (error) {
