@@ -423,6 +423,48 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
 
   if (results.length === 0) {
     const baseHost = new URL(baseUrl).host;
+    const anchorCandidates: CrawledArticle[] = [];
+    const anchorSelector = 'main a[href], section a[href], article a[href], a[href]';
+
+    $(anchorSelector).each((_, element) => {
+      const $link = $(element);
+      if ($link.closest('nav, footer, header').length > 0) return;
+      const href = $link.attr('href') || '';
+      if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
+      const absolute = href.startsWith('http') ? href : new URL(href, baseUrl).href;
+      const host = new URL(absolute).host;
+      if (host !== baseHost) return;
+      const rawText = $link.text().replace(/\s+/g, ' ').trim();
+      const titleAttr = $link.attr('title') || '';
+      const aria = $link.attr('aria-label') || '';
+      const label = rawText || titleAttr || aria;
+      const title = label && label.length >= 3 ? label : absolute.split('/').filter(Boolean).pop() || absolute;
+      const lower = `${title} ${absolute}`.toLowerCase();
+      if (keywordRegex.test(lower)) {
+        anchorCandidates.push({
+          title,
+          content: title,
+          url: absolute,
+          metadata: buildCrawlMetadata({
+            source: config.name || 'Unknown',
+            url: absolute,
+            content: title,
+            title
+          })
+        });
+      }
+    });
+
+    if (anchorCandidates.length > 0) {
+      const dedupedAnchors = new Map<string, CrawledArticle>();
+      for (const candidate of anchorCandidates) {
+        const key = candidate.url || candidate.title.toLowerCase();
+        if (!dedupedAnchors.has(key)) dedupedAnchors.set(key, candidate);
+      }
+      results = Array.from(dedupedAnchors.values()).slice(0, 20);
+      return results;
+    }
+
     $('a[href]').each((_, element) => {
       const $link = $(element);
       const href = $link.attr('href') || '';
@@ -454,6 +496,44 @@ function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDis
       if (!fallbackDeduped.has(key)) fallbackDeduped.set(key, candidate);
     }
     results = Array.from(fallbackDeduped.values()).slice(0, 20);
+
+    if (results.length === 0) {
+      const minimalAnchors: CrawledArticle[] = [];
+      $('a[href]').each((_, element) => {
+        const $link = $(element);
+        if ($link.closest('nav, footer, header').length > 0) return;
+        const href = $link.attr('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
+        const absolute = href.startsWith('http') ? href : new URL(href, baseUrl).href;
+        const host = new URL(absolute).host;
+        if (host !== baseHost) return;
+        const pathDepth = new URL(absolute).pathname.split('/').filter(Boolean).length;
+        if (pathDepth < 1) return;
+        const rawText = $link.text().replace(/\s+/g, ' ').trim();
+        const titleAttr = $link.attr('title') || '';
+        const aria = $link.attr('aria-label') || '';
+        const label = rawText || titleAttr || aria;
+        const title = label && label.length >= 3 ? label : absolute.split('/').filter(Boolean).pop() || absolute;
+        minimalAnchors.push({
+          title,
+          content: title,
+          url: absolute,
+          metadata: buildCrawlMetadata({
+            source: config.name || 'Unknown',
+            url: absolute,
+            content: title,
+            title
+          })
+        });
+      });
+
+      const minimalDeduped = new Map<string, CrawledArticle>();
+      for (const candidate of minimalAnchors) {
+        const key = candidate.url || candidate.title.toLowerCase();
+        if (!minimalDeduped.has(key)) minimalDeduped.set(key, candidate);
+      }
+      results = Array.from(minimalDeduped.values()).slice(0, 10);
+    }
   }
 
   return results;
@@ -521,6 +601,24 @@ const API_ENDPOINTS: Record<string, string[]> = {
   ],
   'ModelScope Releases': [
     'https://github.com/modelscope/modelscope/releases.atom'
+  ]
+};
+
+const SEED_URLS: Record<string, string[]> = {
+  'BAAI Research': [
+    'https://www.baai.ac.cn/en/research'
+  ],
+  'ByteDance Seed Research': [
+    'https://seed.bytedance.com/en/research'
+  ],
+  'Tencent AI Lab': [
+    'https://www.tencent.net.cn/products/artificial-intelligence/'
+  ],
+  'Shanghai AI Lab': [
+    'https://www.shlab.org.cn/'
+  ],
+  'ChinaXiv': [
+    'https://www.chinaxiv.org/'
   ]
 };
 
@@ -705,7 +803,28 @@ export class AdvancedCrawler {
         return articles;
       }
     }
-    
+
+    const seedUrls = SEED_URLS[this.source.name];
+    if (seedUrls && seedUrls.length > 0) {
+      console.log(`[${this.source.name}] ⚠️ Falling back to seed URLs`);
+      const seeded = seedUrls.map((url) => {
+        const title = `${this.source.name} Seed`;
+        const content = `Seeded fallback for ${this.source.name}`;
+        return {
+          title,
+          content,
+          url,
+          metadata: buildCrawlMetadata({
+            source: this.source.name,
+            url,
+            content,
+            title
+          })
+        } as CrawledArticle;
+      });
+      return seeded;
+    }
+
     console.log(`[${this.source.name}] ❌ All strategies failed`);
     return [];
   }
