@@ -1003,17 +1003,6 @@ export default function Home(): React.ReactElement {
                     'Run Manual Scan'
                   )}
                 </button>
-                <button
-                  onClick={analyzeData}
-                  disabled={isLoading || jobProgress?.status === 'running'}
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${
-                    isLoading || jobProgress?.status === 'running'
-                      ? 'bg-[var(--accent)] text-white processing-button scale-105'
-                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
-                  } disabled:cursor-not-allowed`}
-                >
-                  {jobProgress?.status === 'running' ? 'Analyzing…' : 'Run Analysis'}
-                </button>
 
               {/* Progress Bar */}
               {isLoading && jobProgress && (
@@ -1263,6 +1252,20 @@ export default function Home(): React.ReactElement {
         {/* Analysis Tab */}
         {activeTab === 'analysis' && (
           <div className="space-y-4 animate-fade-in">
+            <div className="flex items-center justify-between bg-[var(--surface)] rounded-xl px-4 py-3 border border-[var(--border)]">
+              <div className="text-sm font-semibold text-[var(--foreground)]">Analysis</div>
+              <button
+                onClick={analyzeData}
+                disabled={isLoading || jobProgress?.status === 'running'}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  isLoading || jobProgress?.status === 'running'
+                    ? 'bg-[var(--accent)] text-white processing-button scale-105'
+                    : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
+                } disabled:cursor-not-allowed`}
+              >
+                {jobProgress?.status === 'running' ? 'Analyzing…' : 'Run Analysis'}
+              </button>
+            </div>
             {/* Semantic Search */}
             <SemanticSearch
               onResultClick={(result) => {
@@ -1275,7 +1278,7 @@ export default function Home(): React.ReactElement {
               <div className="bg-[var(--surface)] rounded-xl p-12 border border-[var(--border)] text-center">
                 <div className="text-5xl mb-4">📊</div>
                 <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No analyses yet</h3>
-                <p className="text-[var(--muted)]">Crawl data will be automatically analyzed for AGI indicators</p>
+                <p className="text-[var(--muted)]">Run analysis to score crawled data for AGI indicators.</p>
               </div>
             ) : (
               [...analyses]
