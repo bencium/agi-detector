@@ -126,7 +126,8 @@ export async function findSimilar(
 
 // Find anomalies (articles with embeddings far from cluster center)
 export async function findAnomalies(
-  limit = 10
+  limit = 10,
+  minScore = 0.2
 ): Promise<Array<{
   id: string;
   title: string;
@@ -136,27 +137,47 @@ export async function findAnomalies(
 }>> {
   if (!isDbEnabled) return [];
 
-  // Get articles with highest average distance to other articles
+  // Get articles with highest average distance to their source group centroid
   const sql = `
-    WITH avg_embeddings AS (
-      SELECT AVG(embedding) as center
-      FROM "AnalysisResult"
-      WHERE embedding IS NOT NULL
+    WITH labeled AS (
+      SELECT
+        ar.id,
+        ar.embedding,
+        ar.score,
+        cr.title,
+        cr.url,
+        CASE
+          WHEN COALESCE(cr.metadata->>'source', '') IN ('OpenAI Blog', 'DeepMind Research', 'Anthropic Blog', 'Microsoft AI Blog')
+            THEN 'research'
+          WHEN COALESCE(cr.metadata->>'source', '') IN ('TechCrunch AI', 'VentureBeat AI')
+            THEN 'news'
+          WHEN COALESCE(cr.metadata->>'source', '') IN ('arXiv AI', 'Anthropic Research')
+            THEN 'academic'
+          ELSE 'other'
+        END AS source_group
+      FROM "AnalysisResult" ar
+      JOIN "CrawlResult" cr ON ar."crawlId" = cr.id
+      WHERE ar.embedding IS NOT NULL
+        AND ar.score >= $2
+    ),
+    avg_embeddings AS (
+      SELECT source_group, AVG(embedding) as center
+      FROM labeled
+      GROUP BY source_group
     )
     SELECT
-      ar.id,
-      cr.title,
-      cr.url,
-      ar.score,
-      ar.embedding <=> (SELECT center FROM avg_embeddings) as "avgDistance"
-    FROM "AnalysisResult" ar
-    JOIN "CrawlResult" cr ON ar."crawlId" = cr.id
-    WHERE ar.embedding IS NOT NULL
-    ORDER BY ar.embedding <=> (SELECT center FROM avg_embeddings) DESC
+      l.id,
+      l.title,
+      l.url,
+      l.score,
+      l.embedding <=> c.center as "avgDistance"
+    FROM labeled l
+    JOIN avg_embeddings c ON c.source_group = l.source_group
+    ORDER BY l.embedding <=> c.center DESC
     LIMIT $1
   `;
 
-  return query(sql, [limit]);
+  return query(sql, [limit, minScore]);
 }
 
 // Graceful shutdown

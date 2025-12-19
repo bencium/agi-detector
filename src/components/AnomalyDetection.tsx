@@ -31,7 +31,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
     setError(null);
 
     try {
-      const res = await apiFetch('/api/anomalies?limit=15');
+      const res = await apiFetch('/api/anomalies?limit=15&minScore=0.2');
       const data = await res.json();
 
       if (data.success) {
@@ -155,8 +155,8 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
             <span className="text-[var(--accent)] flex-shrink-0">i</span>
             <div className="text-[var(--muted)]">
               <strong className="text-[var(--foreground)]">How it works:</strong> Uses pgvector to compute the
-              centroid of all article embeddings, then finds articles with the highest distance from that center.
-              Higher distance = more unusual semantic content.
+              centroid of embeddings within each source group (research/news/academic), then finds articles with
+              the highest distance from their group center. Higher distance = more unusual semantic content.
               <div className="mt-1">
                 Distance uses cosine distance (pgvector &lt;=&gt;). Percentile is relative to the current list
                 (P100 = most unusual).
@@ -195,7 +195,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
                 <div className="text-sm text-[var(--muted)]">
-                  Found {sortedAnomalies.length} semantic outliers, ranked by {sortBy === 'distance' ? 'distance' : 'AGI score'}
+                  Found {sortedAnomalies.length} semantic outliers, ranked by {sortBy === 'distance' ? 'distance' : 'AGI score'} · Min AGI 20%
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-[var(--muted)]">Sort by</span>

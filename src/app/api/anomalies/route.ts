@@ -15,9 +15,10 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const limit = parseInt(searchParams.get('limit') || '10', 10);
+  const minScore = parseFloat(searchParams.get('minScore') || '0.2');
 
   try {
-    const anomalies = await findAnomalies(limit);
+    const anomalies = await findAnomalies(limit, Number.isFinite(minScore) ? minScore : 0.2);
 
     return NextResponse.json({
       success: true,
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
           score: a.score,
           avgDistance: Math.round(a.avgDistance * 1000) / 1000
         })),
-        description: 'Articles with embeddings furthest from the cluster center, potentially indicating unusual or unique content'
+        description: `Articles with embeddings furthest from their source-group centroid (min AGI score ${(minScore * 100).toFixed(0)}%)`
       }
     });
   } catch (error) {
