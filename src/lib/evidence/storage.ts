@@ -1,4 +1,5 @@
-import { execute } from '@/lib/db';
+import { execute, queryOne } from '@/lib/db';
+import { buildEvidence } from '@/lib/evidence';
 
 export type StructuredClaim = {
   claim: string;
@@ -89,4 +90,38 @@ export async function upsertEvidenceClaims(input: {
   }
 
   return inserted;
+}
+
+export async function ensureEvidenceClaimsForCrawl(input: {
+  crawlId: string;
+  content: string;
+  metadata?: Record<string, any> | null;
+  url?: string | null;
+  canonicalUrl?: string | null;
+}): Promise<StructuredClaim[]> {
+  await ensureEvidenceSchema();
+  const existing = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text as count FROM "EvidenceClaim" WHERE "crawlId" = $1`,
+    [input.crawlId]
+  );
+
+  const metadataClaims = Array.isArray(input.metadata?.evidence?.claims)
+    ? (input.metadata?.evidence?.claims as StructuredClaim[])
+    : [];
+
+  const claims = metadataClaims.length > 0
+    ? metadataClaims
+    : buildEvidence(input.content).claims;
+
+  const existingCount = Number(existing?.count || 0);
+  if (existingCount === 0 && claims.length > 0) {
+    await upsertEvidenceClaims({
+      crawlId: input.crawlId,
+      claims,
+      url: input.url || null,
+      canonicalUrl: (input.metadata?.canonicalUrl as string | undefined) || input.canonicalUrl || null
+    });
+  }
+
+  return claims;
 }

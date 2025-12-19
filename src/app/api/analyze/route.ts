@@ -15,6 +15,7 @@ import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 import { runLayer0Triage } from '@/lib/analysis/triage';
 import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
 import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
+import { ensureEvidenceClaimsForCrawl } from '@/lib/evidence/storage';
 
 interface CrawlResult {
   id: string;
@@ -293,7 +294,13 @@ export async function POST(request: NextRequest) {
       secrecyBoost = 0.1;
     }
 
-    const claims = metadata?.evidence?.claims || [];
+    const claims = await ensureEvidenceClaimsForCrawl({
+      crawlId: latestCrawl.id,
+      content: latestCrawl.content,
+      metadata: metadata || null,
+      url: latestCrawl.url,
+      canonicalUrl: (metadata as Record<string, any> | null)?.canonicalUrl as string | undefined
+    });
     let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
     if (translatedSnippets.length > 0) {
       const snippetObjects: EvidenceSnippet[] = translatedSnippets.map(text => ({ text, score: 1, tags: [] }));

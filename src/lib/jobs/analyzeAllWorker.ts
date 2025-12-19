@@ -8,6 +8,7 @@ import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 import { runLayer0Triage } from '@/lib/analysis/triage';
 import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
 import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
+import { ensureEvidenceClaimsForCrawl } from '@/lib/evidence/storage';
 
 interface AnalysisJob {
   id: string;
@@ -243,7 +244,11 @@ async function analyzeArticle(crawlResult: CrawlResult, logs: string[] = []): Pr
     const analysisResult = parseOpenAIResponse(content);
     const modelScore = analysisResult.score || 0;
     const crossReferences = analysisResult.cross_references || [];
-    const claims = crawlResult.metadata?.evidence?.claims || [];
+    const claims = await ensureEvidenceClaimsForCrawl({
+      crawlId: crawlResult.id,
+      content: crawlResult.content,
+      metadata: (crawlResult.metadata as Record<string, any> | null) || null
+    });
     let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
     if (translatedSnippets.length > 0) {
       const snippetObjects: EvidenceSnippet[] = translatedSnippets.map(text => ({ text, score: 1, tags: [] }));
