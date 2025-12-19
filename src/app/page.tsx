@@ -418,8 +418,7 @@ export default function Home(): React.ReactElement {
         const savedCount = data?.meta?.savedCount ?? data.data.length;
         const duplicates = data?.meta?.duplicates ?? Math.max(0, totalCrawled - savedCount);
         addLog(`✅ Crawl complete! Saved ${savedCount} new · Crawled ${totalCrawled} total · Duplicates ${duplicates}`);
-        addLog('Starting AGI analysis...');
-        await analyzeData();
+        addLog('Analysis is manual. Use "Run Analysis" when ready.');
       } else {
         throw new Error(data.error || 'Failed to crawl sources');
       }
@@ -1003,6 +1002,17 @@ export default function Home(): React.ReactElement {
                   ) : (
                     'Run Manual Scan'
                   )}
+                </button>
+                <button
+                  onClick={analyzeData}
+                  disabled={isLoading || jobProgress?.status === 'running'}
+                  className={`px-6 py-3 rounded-lg font-medium transition-all ${
+                    isLoading || jobProgress?.status === 'running'
+                      ? 'bg-[var(--accent)] text-white processing-button scale-105'
+                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
+                  } disabled:cursor-not-allowed`}
+                >
+                  {jobProgress?.status === 'running' ? 'Analyzing…' : 'Run Analysis'}
                 </button>
 
               {/* Progress Bar */}
