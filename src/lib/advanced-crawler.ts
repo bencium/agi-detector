@@ -146,6 +146,110 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
   }
 }
 
+async function parseSitemap(url: string, sourceName: string, maxUrls = 8): Promise<CrawledArticle[]> {
+  try {
+    const base = new URL(url);
+    const sitemapCandidates = [
+      new URL('/sitemap.xml', base).toString(),
+      new URL('/sitemap_index.xml', base).toString(),
+      new URL('/sitemap-index.xml', base).toString()
+    ];
+
+    const seen = new Set<string>();
+    const urls: string[] = [];
+
+    const extractLocs = (parsed: any): string[] => {
+      const locs: string[] = [];
+      const urlset = parsed?.urlset?.url || [];
+      const sitemapIndex = parsed?.sitemapindex?.sitemap || [];
+      for (const entry of urlset) {
+        const loc = entry?.loc?.[0];
+        if (typeof loc === 'string') locs.push(loc);
+      }
+      for (const entry of sitemapIndex) {
+        const loc = entry?.loc?.[0];
+        if (typeof loc === 'string') locs.push(loc);
+      }
+      return locs;
+    };
+
+    const fetchAndParse = async (sitemapUrl: string): Promise<string[]> => {
+      const validation = await isUrlSafeWithDns(sitemapUrl);
+      if (!validation.safe) return [];
+      const response = await axios.get(sitemapUrl, {
+        headers: { 'User-Agent': getRandomUserAgent() },
+        timeout: 20000,
+        maxRedirects: 3
+      });
+      const parsed = await parseStringPromise(response.data);
+      return extractLocs(parsed);
+    };
+
+    for (const sitemapUrl of sitemapCandidates) {
+      const locs = await fetchAndParse(sitemapUrl);
+      if (locs.length === 0) continue;
+
+      // If sitemap index, follow up to 2 child sitemaps for coverage.
+      const childSitemaps = locs.filter((loc: string) => loc.includes('sitemap')).slice(0, 2);
+      let resolved = locs;
+      if (childSitemaps.length > 0) {
+        resolved = [];
+        for (const child of childSitemaps) {
+          const childLocs = await fetchAndParse(child);
+          resolved.push(...childLocs);
+          if (resolved.length >= maxUrls * 2) break;
+        }
+      }
+
+      const filtered = resolved.filter((loc: string) => {
+        if (!loc || seen.has(loc)) return false;
+        if (!loc.startsWith('http')) return false;
+        if (new URL(loc).host !== base.host) return false;
+        const lower = loc.toLowerCase();
+        return /(research|publication|paper|news|blog|report|announcement|release|project)/.test(lower);
+      });
+
+      for (const loc of filtered) {
+        if (seen.size >= maxUrls) break;
+        seen.add(loc);
+        urls.push(loc);
+      }
+
+      if (urls.length > 0) break;
+    }
+
+    if (urls.length === 0) return [];
+
+    const slugToTitle = (link: string) => {
+      try {
+        const pathname = new URL(link).pathname.split('/').filter(Boolean);
+        const slug = pathname[pathname.length - 1] || link;
+        return slug
+          .replace(/[-_]/g, ' ')
+          .replace(/\.\w+$/, '')
+          .replace(/\b\w/g, c => c.toUpperCase());
+      } catch {
+        return link;
+      }
+    };
+
+    return urls.map((loc) => ({
+      title: slugToTitle(loc),
+      content: `Discovered via sitemap for ${sourceName}.`,
+      url: loc,
+      metadata: buildCrawlMetadata({
+        source: sourceName,
+        url: loc,
+        content: `Discovered via sitemap for ${sourceName}.`,
+        title: slugToTitle(loc)
+      })
+    }));
+  } catch (error) {
+    console.log(`[Sitemap] Failed to parse sitemap for ${sourceName}: ${error}`);
+    return [];
+  }
+}
+
 // Browser automation with stealth
 let browser: Browser | null = null;
 
@@ -457,6 +561,10 @@ export class AdvancedCrawler {
           });
 
           if (response.status === 200) {
+            if (this.source.autoDiscover) {
+              return discoverArticlesFromHtml(response.data, this.source.url, this.source as AutoDiscoverConfig);
+            }
+
             const $ = cheerio.load(response.data);
             const articles: CrawledArticle[] = [];
 
@@ -508,7 +616,19 @@ export class AdvancedCrawler {
       });
     }
 
-    // Strategy 5: Brave Search as last resort (limited free tier)
+    // Strategy 5: Sitemap fallback for auto-discover sources (China labs, etc.)
+    if (this.source.autoDiscover) {
+      strategies.push({
+        name: 'Sitemap (Fallback)',
+        execute: async () => {
+          console.log(`[${this.source.name}] Using sitemap fallback`);
+          await limiter.removeTokens(1);
+          return await parseSitemap(this.source.url, this.source.name, 8);
+        }
+      });
+    }
+
+    // Strategy 6: Brave Search as last resort (limited free tier)
     strategies.push({
       name: 'Brave Search',
       execute: async () => {
