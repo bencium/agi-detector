@@ -172,6 +172,10 @@ NEXT_PUBLIC_LOCAL_API_KEY=local-...
 # Optional: LLM insights model
 # INSIGHTS_MODEL=gpt-5-mini
 
+# Optional: Insights cache TTL (minutes)
+# Default: 360 (6 hours)
+# INSIGHTS_TTL_MINUTES=360
+
 # Optional: Analyze-all job limits
 # ANALYZE_JOB_LIMIT=50
 # ANALYZE_BATCH_SIZE=2

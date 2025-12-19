@@ -1,4 +1,5 @@
-import { execute, query } from '@/lib/db';
+import { execute, query, queryOne } from '@/lib/db';
+import { ensureEvidenceClaimsForCrawl } from '@/lib/evidence/storage';
 
 export type CorrelationFinding = {
   id: string;
@@ -56,6 +57,33 @@ export async function ensureCorrelationSchema(): Promise<void> {
 
 export async function refreshCorrelationFindings(windowDays: number, limit = 20): Promise<CorrelationFinding[]> {
   await ensureCorrelationSchema();
+
+  const claimCount = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text as count FROM "EvidenceClaim"`
+  );
+  const existingClaims = Number(claimCount?.count || 0);
+  if (existingClaims === 0) {
+    const backfillRows = await query<{
+      id: string;
+      url: string;
+      content: string;
+      metadata: Record<string, unknown> | null;
+    }>(`
+      SELECT id, url, content, metadata
+      FROM "CrawlResult"
+      ORDER BY timestamp DESC
+      LIMIT 200
+    `);
+    for (const row of backfillRows) {
+      await ensureEvidenceClaimsForCrawl({
+        crawlId: row.id,
+        content: row.content,
+        metadata: (row.metadata as Record<string, any> | null) || null,
+        url: row.url,
+        canonicalUrl: (row.metadata as Record<string, any> | null)?.canonicalUrl as string | undefined
+      });
+    }
+  }
 
   const findings = await query<CorrelationFinding & {
     analysis_count: number;

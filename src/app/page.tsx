@@ -556,9 +556,9 @@ export default function Home(): React.ReactElement {
     }
   };
 
-  const fetchInsights = async () => {
+  const fetchInsights = async (force = false) => {
     try {
-      const response = await apiFetch(`/api/insights?days=${insightsWindowDays}&limit=5`);
+      const response = await apiFetch(`/api/insights?days=${insightsWindowDays}&limit=5${force ? '&refresh=true' : ''}`);
       const data = await response.json();
       if (data.success) {
         setInsights(data.data.insights || []);
@@ -670,9 +670,21 @@ export default function Home(): React.ReactElement {
   const getAGIRiskLevel = () => {
     if (analyses.length === 0) return { level: 'LOW', color: 'text-green-600', bg: 'bg-green-50', details: 'No data' };
     
-    const avgScore = analyses.reduce((acc, a) => acc + a.score, 0) / analyses.length;
-    const highRiskCount = analyses.filter(a => a.score >= 0.5).length;
-    const criticalCount = analyses.filter(a => a.severity === 'critical' || a.score >= 0.7).length;
+    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const recentAnalyses = analyses.filter(a => {
+      if (!a.timestamp) return true;
+      return new Date(a.timestamp).getTime() >= cutoff;
+    });
+    const hasDelta = (analysis: AnalysisResult) => {
+      const claims = analysis.crawl?.metadata?.evidence?.claims || [];
+      return claims.some(c => c.benchmark && typeof c.delta === 'number');
+    };
+    const evidenceBacked = recentAnalyses.filter(a => hasDelta(a));
+    const pool = evidenceBacked.length > 0 ? evidenceBacked : recentAnalyses;
+
+    const avgScore = pool.reduce((acc, a) => acc + a.score, 0) / Math.max(pool.length, 1);
+    const highRiskCount = pool.filter(a => (a.severity || '').toLowerCase() === 'high').length;
+    const criticalCount = pool.filter(a => (a.severity || '').toLowerCase() === 'critical').length;
     
     // If ANY critical findings, show HIGH risk
     if (criticalCount > 0) {
@@ -680,7 +692,7 @@ export default function Home(): React.ReactElement {
         level: 'HIGH', 
         color: 'text-red-600', 
         bg: 'bg-red-50',
-        details: `${criticalCount} critical findings!`
+        details: `${criticalCount} critical findings${evidenceBacked.length === 0 ? ' (unverified)' : ''}`
       };
     }
     
@@ -690,14 +702,19 @@ export default function Home(): React.ReactElement {
         level: 'MEDIUM', 
         color: 'text-yellow-600', 
         bg: 'bg-yellow-50',
-        details: `${highRiskCount} high-risk articles`
+        details: `${highRiskCount} high-risk articles${evidenceBacked.length === 0 ? ' (unverified)' : ''}`
       };
     }
     
     // Otherwise use average
     if (avgScore < 0.3) return { level: 'LOW', color: 'text-green-600', bg: 'bg-green-50', details: `Avg: ${(avgScore * 100).toFixed(1)}%` };
     if (avgScore < 0.6) return { level: 'MEDIUM', color: 'text-yellow-600', bg: 'bg-yellow-50', details: `Avg: ${(avgScore * 100).toFixed(1)}%` };
-    return { level: 'HIGH', color: 'text-red-600', bg: 'bg-red-50', details: `Avg: ${(avgScore * 100).toFixed(1)}%` };
+    return {
+      level: evidenceBacked.length > 0 ? 'HIGH' : 'MEDIUM',
+      color: evidenceBacked.length > 0 ? 'text-red-600' : 'text-yellow-600',
+      bg: evidenceBacked.length > 0 ? 'bg-red-50' : 'bg-yellow-50',
+      details: `Avg: ${(avgScore * 100).toFixed(1)}%${evidenceBacked.length === 0 ? ' (unverified)' : ''}`
+    };
   };
 
   const riskLevel = getAGIRiskLevel();
@@ -1022,7 +1039,7 @@ export default function Home(): React.ReactElement {
                   </p>
                 </div>
                 <button
-                  onClick={fetchInsights}
+                  onClick={() => fetchInsights(true)}
                   className="text-xs px-3 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-hover)]"
                 >
                   Refresh
