@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, insert, isDbEnabled } from '@/lib/db';
 import { openai, AGI_DETECTION_PROMPT, generateEmbedding } from '@/lib/openai';
-import { computeSeverity } from '@/lib/severity';
+import { computeSeverity, enforceCriticalEvidenceGate } from '@/lib/severity';
 import { parseOpenAIResponse } from '@/lib/utils/safeJson';
 import {
   analyzeForSecrecyIndicators,
@@ -10,7 +10,7 @@ import {
 } from '@/lib/detection/silence-patterns';
 import { upsertTrendSnapshot } from '@/lib/trends';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
-import { computeCombinedScore, computeHeuristicScore } from '@/lib/scoring/multiSignal';
+import { computeCombinedScore, computeHeuristicScore, hasBenchmarkDelta } from '@/lib/scoring/multiSignal';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 
 interface CrawlResult {
@@ -192,7 +192,9 @@ export async function POST(request: NextRequest) {
       signals
     });
 
-    const severity = computeSeverity(combined.combinedScore, analysisResult.severity);
+    const hasDelta = hasBenchmarkDelta(claims);
+    let severity = computeSeverity(combined.combinedScore, analysisResult.severity);
+    severity = enforceCriticalEvidenceGate(severity, hasDelta);
 
     // Generate embedding for semantic search (async, ~100ms)
     let embeddingValue: string | null = null;

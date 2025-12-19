@@ -23,3 +23,20 @@ export function computeSeverity(score: number, prior?: Severity | null): Severit
   return rank[computed] >= rank[prior] ? computed : prior;
 }
 
+export function enforceCriticalEvidenceGate(
+  severity: Severity,
+  hasBenchmarkDelta: boolean
+): Severity {
+  if (severity === 'critical' && !hasBenchmarkDelta) return 'high';
+  return severity;
+}
+
+export function applyValidationOverride(
+  severity: Severity,
+  recommendation?: string
+): Severity {
+  if (recommendation === 'dismiss' && rank[severity] > rank.medium) {
+    return 'medium';
+  }
+  return severity;
+}

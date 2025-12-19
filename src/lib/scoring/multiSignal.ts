@@ -88,6 +88,14 @@ export function computeHeuristicScore(input: {
   return { score: clamp(score, 0, HEURISTIC_MAX), signals };
 }
 
+export function hasBenchmarkDelta(claims: EvidenceClaim[] = []): boolean {
+  return claims.some((claim) =>
+    Boolean(claim.benchmark) &&
+    typeof claim.delta === 'number' &&
+    Number.isFinite(claim.delta)
+  );
+}
+
 export function computeCombinedScore(input: {
   modelScore: number;
   heuristicScore: number;

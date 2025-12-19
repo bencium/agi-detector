@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import { query, queryOne, execute, isDbEnabled } from '@/lib/db';
 import { openai } from '@/lib/openai';
 import { crawlSource, SOURCES } from '@/lib/crawler';
-import { computeSeverity } from '@/lib/severity';
+import { applyValidationOverride, computeSeverity, enforceCriticalEvidenceGate } from '@/lib/severity';
 import { safeJsonParse } from '@/lib/utils/safeJson';
 import { z } from 'zod';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
-import { computeCombinedScore, computeHeuristicScore } from '@/lib/scoring/multiSignal';
+import { computeCombinedScore, computeHeuristicScore, hasBenchmarkDelta } from '@/lib/scoring/multiSignal';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 import {
   analyzeForSecrecyIndicators,
@@ -213,7 +213,10 @@ export async function POST(request: Request) {
       heuristicScore: heuristic.score
     };
 
-    const newSeverity = computeSeverity(finalScore, (analysis.severity || 'none') as 'none' | 'low' | 'medium' | 'high' | 'critical');
+    const hasDelta = hasBenchmarkDelta(analysis.metadata?.evidence?.claims || []);
+    let newSeverity = computeSeverity(finalScore, (analysis.severity || 'none') as 'none' | 'low' | 'medium' | 'high' | 'critical');
+    newSeverity = enforceCriticalEvidenceGate(newSeverity, hasDelta);
+    newSeverity = applyValidationOverride(newSeverity, validationResult.recommendation);
 
     // Merge indicators
     const mergedIndicators = [...new Set([...analysis.indicators, ...(validationResult.additionalIndicators || [])])];

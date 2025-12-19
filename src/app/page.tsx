@@ -858,42 +858,6 @@ export default function Home(): React.ReactElement {
               onRefresh={loadExistingData}
             />
 
-            {/* Key Indicators */}
-            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
-              <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Detection Indicators</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  {
-                    icon: '⚡',
-                    title: 'Performance Leaps',
-                    description: 'Unexplained improvements in AI capabilities beyond expected progress'
-                  },
-                  {
-                    icon: '🔄',
-                    title: 'Self-Improvement',
-                    description: 'AI systems demonstrating ability to enhance their own architecture'
-                  },
-                  {
-                    icon: '🌐',
-                    title: 'Cross-Domain Transfer',
-                    description: 'Knowledge transfer between unrelated domains without explicit training'
-                  },
-                  {
-                    icon: '🤖',
-                    title: 'Autonomous Behavior',
-                    description: 'Independent decision-making beyond programmed parameters'
-                  },
-                ].map((indicator) => (
-                  <div key={indicator.title} className="flex space-x-3">
-                    <div className="text-2xl">{indicator.icon}</div>
-                    <div>
-                      <h4 className="font-medium text-[var(--foreground)]">{indicator.title}</h4>
-                      <p className="text-sm text-[var(--muted)]">{indicator.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 

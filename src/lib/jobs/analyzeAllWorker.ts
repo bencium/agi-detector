@@ -1,9 +1,9 @@
 import { query, insert, execute } from '@/lib/db';
 import { openai, AGI_DETECTION_PROMPT, generateEmbedding } from '@/lib/openai';
-import { computeSeverity } from '@/lib/severity';
+import { computeSeverity, enforceCriticalEvidenceGate } from '@/lib/severity';
 import { parseOpenAIResponse } from '@/lib/utils/safeJson';
 import { upsertTrendSnapshot } from '@/lib/trends';
-import { computeCombinedScore, computeHeuristicScore } from '@/lib/scoring/multiSignal';
+import { computeCombinedScore, computeHeuristicScore, hasBenchmarkDelta } from '@/lib/scoring/multiSignal';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
 
 interface AnalysisJob {
@@ -15,7 +15,20 @@ interface CrawlResult {
   title: string;
   content: string;
   metadata?: {
-    evidence?: { snippets?: string[] };
+    evidence?: {
+      snippets?: string[];
+      claims?: Array<{
+        claim: string;
+        evidence: string;
+        tags: string[];
+        numbers: number[];
+        benchmark?: string;
+        metric?: string;
+        value?: number;
+        delta?: number;
+        unit?: string;
+      }>;
+    };
   } | null;
 }
 
@@ -131,7 +144,10 @@ async function analyzeArticle(crawlResult: CrawlResult, logs: string[] = []): Pr
       secrecyBoost: 0,
       signals: heuristic.signals
     });
-    const severity = computeSeverity(combined.combinedScore, analysisResult.severity);
+    const claims = crawlResult.metadata?.evidence?.claims || [];
+    const hasDelta = hasBenchmarkDelta(claims);
+    let severity = computeSeverity(combined.combinedScore, analysisResult.severity);
+    severity = enforceCriticalEvidenceGate(severity, hasDelta);
 
     // Generate embedding for semantic search
     let embeddingValue: string | null = null;
