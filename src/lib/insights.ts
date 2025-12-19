@@ -1,23 +1,22 @@
 import { execute, query } from '@/lib/db';
 import { openai } from '@/lib/openai';
-import { buildEvidence } from '@/lib/evidence';
 import { safeJsonParse } from '@/lib/utils/safeJson';
 
-type SourceSnippet = {
+type AggregateRow = {
+  indicator: string;
   source: string;
-  title: string;
-  url: string;
-  timestamp: string;
-  claim?: string | null;
-  indicators?: string[] | null;
-  severity?: string | null;
-  score?: number | null;
-  benchmark?: string | null;
-  metric?: string | null;
-  delta?: number | null;
-  value?: number | null;
-  unit?: string | null;
-  snippets?: string[];
+  cnt_30: number;
+  cnt_90: number;
+  cnt_180: number;
+  example_title: string | null;
+  example_url: string | null;
+};
+
+type IndicatorTotalRow = {
+  indicator: string;
+  cnt_30: number;
+  cnt_90: number;
+  cnt_180: number;
 };
 
 type InsightDraft = {
@@ -45,23 +44,6 @@ export type InsightFinding = {
 let insightSchemaEnsured = false;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
-const shuffle = <T,>(items: T[]): T[] => {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-};
-
-const chunkArray = <T,>(items: T[], size: number): T[][] => {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-};
 
 const stripJson = (raw: string): string => {
   const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
@@ -116,84 +98,6 @@ const parseInsightsResponse = (raw: string): InsightDraft[] => {
   return insights.map(normalizeInsight).filter((item): item is InsightDraft => Boolean(item));
 };
 
-const truncate = (text: string, limit = 220) => {
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit - 1)}…`;
-};
-
-const buildItemLine = (item: SourceSnippet, index: number) => {
-  const parts: string[] = [];
-  parts.push(`source: ${item.source}`);
-  parts.push(`title: ${truncate(item.title, 160)}`);
-  parts.push(`url: ${item.url}`);
-  if (item.claim) {
-    parts.push(`claim: ${truncate(item.claim, 220)}`);
-  } else if (item.snippets && item.snippets.length > 0) {
-    parts.push(`snippet: ${truncate(item.snippets[0] || '', 200)}`);
-  }
-  if (item.benchmark || item.metric || item.delta != null || item.value != null) {
-    const details = [
-      item.benchmark ? `benchmark=${item.benchmark}` : null,
-      item.metric ? `metric=${item.metric}` : null,
-      item.delta != null ? `delta=${item.delta}${item.unit || ''}` : null,
-      item.value != null ? `value=${item.value}${item.unit || ''}` : null
-    ].filter(Boolean).join(', ');
-    if (details) parts.push(details);
-  }
-  return `${index + 1}. ${parts.join(' | ')}`;
-};
-
-async function runInsightPass(items: SourceSnippet[], model: string, temperature: number): Promise<InsightDraft[]> {
-  const lines = items.map((item, idx) => buildItemLine(item, idx)).join('\n');
-  const prompt = `You are synthesizing cross-source insights about AGI-relevant signals.
-Only use the provided items. Do not invent sources, URLs, or evidence.
-Each insight must reference at least TWO different sources.
-If evidence is weak, return an empty list.
-Return JSON ONLY with shape: {"insights": [{"title": string, "summary": string, "confidence": number, "sources": string[], "urls": string[], "evidenceSnippets": string[]}]}
-
-Items:\n${lines}`.trim();
-
-  const response = await openai.chat.completions.create({
-    model,
-    temperature,
-    messages: [
-      { role: 'system', content: 'Return JSON only. No markdown.' },
-      { role: 'user', content: prompt }
-    ]
-  });
-
-  const raw = response.choices[0]?.message?.content || '';
-  return parseInsightsResponse(raw);
-}
-
-async function mergeInsightPass(candidates: InsightDraft[], limit: number, model: string): Promise<InsightDraft[]> {
-  const payload = candidates.slice(0, 20).map((item, idx) => ({
-    idx: idx + 1,
-    title: item.title,
-    summary: item.summary,
-    confidence: item.confidence,
-    sources: item.sources,
-    urls: item.urls,
-    evidenceSnippets: item.evidenceSnippets
-  }));
-
-  const prompt = `You are consolidating candidate insights. Merge duplicates and return the best ${limit}.
-Return JSON ONLY with shape: {"insights": [ ... ]} using the same fields.
-Candidates:\n${JSON.stringify(payload, null, 2)}`.trim();
-
-  const response = await openai.chat.completions.create({
-    model,
-    temperature: 0.4,
-    messages: [
-      { role: 'system', content: 'Return JSON only. No markdown.' },
-      { role: 'user', content: prompt }
-    ]
-  });
-
-  const raw = response.choices[0]?.message?.content || '';
-  return parseInsightsResponse(raw);
-}
-
 export async function ensureInsightSchema(): Promise<void> {
   if (insightSchemaEnsured) return;
   try {
@@ -229,180 +133,98 @@ export async function ensureInsightSchema(): Promise<void> {
 export async function refreshInsights(windowDays: number, limit = 5): Promise<InsightFinding[]> {
   await ensureInsightSchema();
 
-  const sampleLimit = clamp(Number(process.env.INSIGHTS_SAMPLE_LIMIT || 80), 30, 300);
-  const chunkSize = clamp(Number(process.env.INSIGHTS_CHUNK_SIZE || 30), 15, 80);
-  const maxResults = clamp(Number(process.env.INSIGHTS_MAX_RESULTS || limit), 1, 10);
-  const temperature = clamp(Number(process.env.INSIGHTS_TEMPERATURE || 0.6), 0, 1);
-  const maxChunks = clamp(Number(process.env.INSIGHTS_MAX_CHUNKS || 1), 1, 4);
+  const maxWindow = Math.max(windowDays, 180);
+  const aggLimit = clamp(Number(process.env.INSIGHTS_AGG_LIMIT || 80), 30, 200);
   const model = process.env.INSIGHTS_MODEL || process.env.OPENAI_MODEL || 'gpt-5-mini';
+  const temperature = clamp(Number(process.env.INSIGHTS_TEMPERATURE || 0.5), 0, 1);
 
-  let items: SourceSnippet[] = [];
+  const aggregates = await query<AggregateRow>(`
+    SELECT
+      LOWER(indicator) AS indicator,
+      COALESCE(cr.metadata->>'source', 'Unknown') AS source,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '30 days')::int AS cnt_30,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '90 days')::int AS cnt_90,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '180 days')::int AS cnt_180,
+      (array_agg(cr.title ORDER BY ar.timestamp DESC))[1] AS example_title,
+      (array_agg(cr.url ORDER BY ar.timestamp DESC))[1] AS example_url
+    FROM "AnalysisResult" ar
+    JOIN "CrawlResult" cr ON cr.id = ar."crawlId"
+    CROSS JOIN LATERAL unnest(ar.indicators) AS indicator
+    WHERE ar.timestamp >= NOW() - ($1 || ' days')::interval
+    GROUP BY indicator, source
+    ORDER BY cnt_30 DESC NULLS LAST, cnt_90 DESC, cnt_180 DESC
+    LIMIT $2
+  `, [maxWindow, aggLimit]);
 
-  try {
-    const evidenceRows = await query<{
-      source: string | null;
-      title: string;
-      url: string;
-      timestamp: Date;
-      indicators: string[] | null;
-      severity: string | null;
-      score: number | null;
-      claim: string | null;
-      benchmark: string | null;
-      metric: string | null;
-      delta: number | null;
-      value: number | null;
-      unit: string | null;
-    }>(`
-      SELECT
-        COALESCE(cr.metadata->>'source', 'Unknown') as source,
-        cr.title,
-        cr.url,
-        cr.timestamp,
-        ar.indicators,
-        ar.severity,
-        ar.score,
-        ec.claim,
-        ec.benchmark,
-        ec.metric,
-        ec.delta,
-        ec.value,
-        ec.unit
-      FROM "EvidenceClaim" ec
-      JOIN "CrawlResult" cr ON cr.id = ec."crawlId"
-      JOIN "AnalysisResult" ar ON ar."crawlId" = cr.id
-      WHERE cr.timestamp >= NOW() - ($1 || ' days')::interval
-      ORDER BY random()
-      LIMIT $2
-    `, [windowDays, sampleLimit]);
-
-    items = evidenceRows.map((row) => ({
-      source: row.source || 'Unknown',
-      title: row.title,
-      url: row.url,
-      timestamp: row.timestamp.toISOString(),
-      indicators: row.indicators || [],
-      severity: row.severity,
-      score: row.score,
-      claim: row.claim,
-      benchmark: row.benchmark,
-      metric: row.metric,
-      delta: row.delta,
-      value: row.value,
-      unit: row.unit
-    }));
-  } catch (error) {
-    console.warn('[Insights] Evidence claim query failed, falling back to crawl content:', error);
-  }
-
-  if (items.length === 0) {
-    const fallbackRows = await query<{
-      source: string | null;
-      title: string;
-      url: string;
-      timestamp: Date;
-      content: string | null;
-      indicators: string[] | null;
-      severity: string | null;
-      score: number | null;
-      metadata: Record<string, unknown> | null;
-    }>(`
-      SELECT
-        COALESCE(cr.metadata->>'source', 'Unknown') as source,
-        cr.title,
-        cr.url,
-        cr.timestamp,
-        cr.content,
-        cr.metadata,
-        ar.indicators,
-        ar.severity,
-        ar.score
-      FROM "CrawlResult" cr
-      JOIN "AnalysisResult" ar ON ar."crawlId" = cr.id
-      WHERE cr.timestamp >= NOW() - ($1 || ' days')::interval
-      ORDER BY cr.timestamp DESC
-      LIMIT 200
-    `, [windowDays]);
-
-    items = fallbackRows.map((row) => {
-      const content = typeof row.content === 'string' ? row.content : '';
-      let snippets: string[] = [];
-      try {
-        snippets = buildEvidence(content).snippets.slice(0, 2);
-      } catch (err) {
-        snippets = [];
-      }
-      return {
-        source: row.source || 'Unknown',
-        title: row.title,
-        url: row.url,
-        timestamp: row.timestamp.toISOString(),
-        indicators: row.indicators || [],
-        severity: row.severity,
-        score: row.score,
-        snippets
-      };
-    });
-  }
-
-  const usable = items.filter((item) => item.claim || (item.snippets && item.snippets.length > 0) || (item.indicators && item.indicators.length > 0));
-  const bySource = new Map<string, SourceSnippet[]>();
-  for (const item of usable) {
-    const key = item.source || 'Unknown';
-    if (!bySource.has(key)) bySource.set(key, []);
-    bySource.get(key)?.push(item);
-  }
-  const cappedPerSource = 2;
-  const sourceBalanced = Array.from(bySource.values()).flatMap(list => list.slice(0, cappedPerSource));
-
-  if (sourceBalanced.length === 0) {
+  if (!aggregates || aggregates.length === 0) {
     return [];
   }
 
-  const shuffled = shuffle(sourceBalanced);
-  const chunks = chunkArray(shuffled, chunkSize).slice(0, maxChunks);
-  const candidates: InsightDraft[] = [];
+  const indicatorTotals = await query<IndicatorTotalRow>(`
+    SELECT
+      LOWER(indicator) AS indicator,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '30 days')::int AS cnt_30,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '90 days')::int AS cnt_90,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '180 days')::int AS cnt_180
+    FROM "AnalysisResult" ar
+    CROSS JOIN LATERAL unnest(ar.indicators) AS indicator
+    WHERE ar.timestamp >= NOW() - ($1 || ' days')::interval
+    GROUP BY indicator
+    ORDER BY cnt_30 DESC NULLS LAST, cnt_90 DESC, cnt_180 DESC
+    LIMIT 30
+  `, [maxWindow]);
 
-  for (const chunk of chunks) {
-    try {
-      const chunkInsights = await runInsightPass(chunk, model, temperature);
-      candidates.push(...chunkInsights);
-      if (candidates.length >= maxResults) {
-        break;
-      }
-    } catch (error) {
-      console.warn('[Insights] Chunk insight pass failed:', error);
-    }
-  }
+  const analysisCounts = await query<{ cnt_30: number; cnt_90: number; cnt_180: number }>(`
+    SELECT
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '30 days')::int AS cnt_30,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '90 days')::int AS cnt_90,
+      COUNT(*) FILTER (WHERE ar.timestamp >= NOW() - INTERVAL '180 days')::int AS cnt_180
+    FROM "AnalysisResult" ar
+    WHERE ar.timestamp >= NOW() - ($1 || ' days')::interval
+  `, [maxWindow]);
 
-  if (candidates.length === 0) {
+  const totals = analysisCounts[0] || { cnt_30: 0, cnt_90: 0, cnt_180: 0 };
+
+  const aggregateLines = aggregates.map((row, idx) => {
+    return `${idx + 1}. indicator=${row.indicator} | source=${row.source} | 30d=${row.cnt_30} | 90d=${row.cnt_90} | 180d=${row.cnt_180} | example="${row.example_title || 'n/a'}" | url=${row.example_url || 'n/a'}`;
+  }).join('\n');
+
+  const totalsLines = indicatorTotals.map((row, idx) => {
+    return `${idx + 1}. ${row.indicator} | 30d=${row.cnt_30} | 90d=${row.cnt_90} | 180d=${row.cnt_180}`;
+  }).join('\n');
+
+  const prompt = `You are given deterministic aggregate counts of AGI indicators by source. Use these summaries to infer cross-source correlations and trends. Only use the data provided below. Do not invent sources or URLs. Each insight must reference at least TWO different sources and include representative URLs.
+If the data is sparse or dominated by one source, return an empty list.
+Return JSON ONLY with shape: {"insights": [{"title": string, "summary": string, "confidence": number, "sources": string[], "urls": string[], "evidenceSnippets": string[]}]}.
+
+Analysis counts:
+- 30d total analyses: ${totals.cnt_30}
+- 90d total analyses: ${totals.cnt_90}
+- 180d total analyses: ${totals.cnt_180}
+
+Top indicators overall:
+${totalsLines}
+
+Indicator by source (with representative example):
+${aggregateLines}`.trim();
+
+  const response = await openai.chat.completions.create({
+    model,
+    temperature,
+    messages: [
+      { role: 'system', content: 'Return JSON only. No markdown.' },
+      { role: 'user', content: prompt }
+    ]
+  });
+
+  const raw = response.choices[0]?.message?.content || '';
+  const parsed = parseInsightsResponse(raw);
+
+  if (!parsed || parsed.length === 0) {
     return [];
   }
 
-  const deduped: InsightDraft[] = [];
-  const seenTitles = new Set<string>();
-  for (const insight of candidates) {
-    const key = insight.title.toLowerCase();
-    if (seenTitles.has(key)) continue;
-    seenTitles.add(key);
-    deduped.push(insight);
-  }
-
-  let finalInsights = deduped;
-  if (deduped.length > maxResults) {
-    try {
-      const merged = await mergeInsightPass(deduped, maxResults, model);
-      if (merged.length > 0) {
-        finalInsights = merged;
-      }
-    } catch (error) {
-      console.warn('[Insights] Merge pass failed, using deduped list:', error);
-    }
-  }
-
-  const toStore = finalInsights.slice(0, maxResults);
-
-  for (const item of toStore) {
+  for (const item of parsed.slice(0, limit)) {
     await execute(
       `INSERT INTO "InsightFinding"
        ("windowDays", title, summary, confidence, sources, urls, "evidenceSnippets")

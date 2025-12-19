@@ -15,7 +15,7 @@ An advanced monitoring system designed to detect early signs of Artificial Gener
 - **CJK normalization**: Chinese text gets tokenization support and optional translation for consistent indicators.
 - **Playwright retries**: Gated sources use Playwright with retries for better coverage.
 - **Correlation MVP**: Cross-source co-occurrence of indicators + benchmark deltas surfaced on Overview.
-- **LLM Insights**: LLM-only synthesis across sources with grounded URLs (token-capped, chunked + non-deterministic).
+- **LLM Insights**: SQL-aggregated indicator counts + LLM synthesis (cached daily).
 - **Manual analysis**: Crawls no longer auto-trigger analysis; run analysis explicitly when ready.
 
 ## 🧭 Roadmap (Next)

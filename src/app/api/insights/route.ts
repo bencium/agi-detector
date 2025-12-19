@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Math.max(Number(searchParams.get('limit') || 5), 1), 10);
     const refreshParam = (searchParams.get('refresh') || 'false').toLowerCase();
     const forceRefresh = refreshParam === 'true' || refreshParam === 'force';
-    const ttlMinutes = Math.min(Math.max(Number(process.env.INSIGHTS_TTL_MINUTES || 360), 15), 1440);
+    const ttlMinutes = Math.min(Math.max(Number(process.env.INSIGHTS_TTL_MINUTES || 1440), 15), 1440);
 
     const cached = await getInsights(windowDays, limit);
     const hasApiKey = !!(process.env.OPENAI_API_KEY || process.env.API_KEY);
