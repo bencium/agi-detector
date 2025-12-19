@@ -98,6 +98,52 @@ const parseInsightsResponse = (raw: string): InsightDraft[] => {
   return insights.map(normalizeInsight).filter((item): item is InsightDraft => Boolean(item));
 };
 
+const buildFallbackInsights = (
+  aggregates: AggregateRow[],
+  windowDays: number,
+  limit: number
+): InsightDraft[] => {
+  if (aggregates.length === 0) return [];
+  const field = windowDays <= 30 ? 'cnt_30' : windowDays <= 90 ? 'cnt_90' : 'cnt_180';
+  const byIndicator = new Map<string, AggregateRow[]>();
+  for (const row of aggregates) {
+    if (!byIndicator.has(row.indicator)) byIndicator.set(row.indicator, []);
+    byIndicator.get(row.indicator)?.push(row);
+  }
+
+  const ranked = Array.from(byIndicator.entries())
+    .map(([indicator, rows]) => {
+      const total = rows.reduce((sum, r) => sum + (r as any)[field], 0);
+      return { indicator, rows, total };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  const insights: InsightDraft[] = [];
+  for (const entry of ranked.slice(0, limit)) {
+    const rows = [...entry.rows].sort((a, b) => (b as any)[field] - (a as any)[field]);
+    const topSources = rows.slice(0, 3).map(r => r.source);
+    const urls = rows.slice(0, 3).map(r => r.example_url).filter(Boolean) as string[];
+    const evidenceSnippets = rows.slice(0, 3).map(r => `${r.source}: ${field.replace('cnt_', '')}d=${(r as any)[field]}`);
+    const sourceCount = new Set(rows.map(r => r.source)).size;
+    const confidence = sourceCount >= 3 ? 0.6 : sourceCount === 2 ? 0.5 : 0.35;
+
+    insights.push({
+      title: sourceCount >= 2
+        ? `Cross-source signal: ${entry.indicator}`
+        : `Single-source concentration: ${entry.indicator}`,
+      summary: sourceCount >= 2
+        ? `Indicator '${entry.indicator}' appears across ${sourceCount} sources. Top activity: ${rows.slice(0, 3).map(r => `${r.source} (${(r as any)[field]})`).join(', ')}.`
+        : `Indicator '${entry.indicator}' is concentrated in ${rows[0]?.source}. Cross-source confirmation not yet observed.`,
+      confidence,
+      sources: topSources,
+      urls,
+      evidenceSnippets
+    });
+  }
+
+  return insights;
+};
+
 export async function ensureInsightSchema(): Promise<void> {
   if (insightSchemaEnsured) return;
   try {
@@ -137,6 +183,7 @@ export async function refreshInsights(windowDays: number, limit = 5): Promise<In
   const aggLimit = clamp(Number(process.env.INSIGHTS_AGG_LIMIT || 80), 30, 200);
   const model = process.env.INSIGHTS_MODEL || process.env.OPENAI_MODEL || 'gpt-5-mini';
   const temperature = clamp(Number(process.env.INSIGHTS_TEMPERATURE || 0.5), 0, 1);
+  const hasApiKey = !!(process.env.OPENAI_API_KEY || process.env.API_KEY);
 
   const aggregates = await query<AggregateRow>(`
     SELECT
@@ -208,17 +255,24 @@ ${totalsLines}
 Indicator by source (with representative example):
 ${aggregateLines}`.trim();
 
-  const response = await openai.chat.completions.create({
-    model,
-    temperature,
-    messages: [
-      { role: 'system', content: 'Return JSON only. No markdown.' },
-      { role: 'user', content: prompt }
-    ]
-  });
+  let parsed: InsightDraft[] = [];
+  if (hasApiKey) {
+    const response = await openai.chat.completions.create({
+      model,
+      temperature,
+      messages: [
+        { role: 'system', content: 'Return JSON only. No markdown.' },
+        { role: 'user', content: prompt }
+      ]
+    });
 
-  const raw = response.choices[0]?.message?.content || '';
-  const parsed = parseInsightsResponse(raw);
+    const raw = response.choices[0]?.message?.content || '';
+    parsed = parseInsightsResponse(raw);
+  }
+
+  if (!parsed || parsed.length === 0) {
+    parsed = buildFallbackInsights(aggregates, windowDays, limit);
+  }
 
   if (!parsed || parsed.length === 0) {
     return [];

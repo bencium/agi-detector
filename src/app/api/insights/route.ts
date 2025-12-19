@@ -11,8 +11,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const windowDays = Math.min(Math.max(Number(searchParams.get('days') || 30), 7), 365);
     const limit = Math.min(Math.max(Number(searchParams.get('limit') || 5), 1), 10);
-    const refreshParam = (searchParams.get('refresh') || 'false').toLowerCase();
-    const forceRefresh = refreshParam === 'true' || refreshParam === 'force';
     const ttlMinutes = Math.min(Math.max(Number(process.env.INSIGHTS_TTL_MINUTES || 1440), 15), 1440);
 
     const cached = await getInsights(windowDays, limit);
@@ -23,17 +21,14 @@ export async function GET(request: NextRequest) {
 
     let insights = cached;
     let errorMessage: string | null = null;
-    if (cached.length === 0 || !ttlFresh || forceRefresh) {
-      if (!hasApiKey) {
-        errorMessage = 'OpenAI API key not configured';
-      } else {
-        try {
-          insights = await refreshInsights(windowDays, limit);
-        } catch (error) {
-          errorMessage = error instanceof Error ? error.message : 'Failed to refresh insights';
-          // fall back to cached data if available
-          insights = cached;
-        }
+    const shouldRefresh = cached.length === 0 || !ttlFresh;
+    if (shouldRefresh) {
+      try {
+        insights = await refreshInsights(windowDays, limit);
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : 'Failed to refresh insights';
+        // fall back to cached data if available
+        insights = cached;
       }
     }
 
@@ -41,7 +36,7 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         insights,
-        cached: cached.length > 0 && ttlFresh && !forceRefresh,
+        cached: cached.length > 0 && ttlFresh,
         error: errorMessage,
         ttlMinutes,
         windowDays
