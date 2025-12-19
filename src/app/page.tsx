@@ -76,6 +76,7 @@ interface AnalysisResult {
     newConfidence?: number;
     addedIndicators?: number;
     recommendation?: string;
+    corroborationPenalty?: number;
     timestamp?: string;
   };
 }
@@ -152,7 +153,15 @@ const buildMonitoringStatus = (stats: Record<string, number>): SourceStatus[] =>
   { name: 'deepmind', displayName: 'DeepMind', type: 'research_lab', status: 'active', articleCount: stats['DeepMind Research'] || 0 },
   { name: 'anthropic', displayName: 'Anthropic', type: 'research_lab', status: 'active', articleCount: stats['Anthropic Blog'] || 0 },
   { name: 'microsoft', displayName: 'Microsoft AI', type: 'corporate', status: 'active', articleCount: stats['Microsoft AI Blog'] || 0 },
+  { name: 'baai', displayName: 'BAAI', type: 'research_lab', status: 'active', articleCount: stats['BAAI Research'] || 0 },
+  { name: 'bytedance_seed', displayName: 'ByteDance Seed', type: 'research_lab', status: 'active', articleCount: stats['ByteDance Seed Research'] || 0 },
+  { name: 'tencent_ai_lab', displayName: 'Tencent AI Lab', type: 'research_lab', status: 'active', articleCount: stats['Tencent AI Lab'] || 0 },
+  { name: 'shlab', displayName: 'Shanghai AI Lab', type: 'research_lab', status: 'active', articleCount: stats['Shanghai AI Lab'] || 0 },
   { name: 'arxiv', displayName: 'arXiv AI', type: 'academic', status: 'active', articleCount: stats['arXiv AI'] || 0 },
+  { name: 'chinaxiv', displayName: 'ChinaXiv', type: 'academic', status: 'active', articleCount: stats['ChinaXiv'] || 0 },
+  { name: 'qwen', displayName: 'Qwen Releases', type: 'research_lab', status: 'active', articleCount: stats['Qwen GitHub Releases'] || 0 },
+  { name: 'huawei_noah', displayName: 'Huawei Noah', type: 'research_lab', status: 'active', articleCount: stats['Huawei Noah Research'] || 0 },
+  { name: 'modelscope', displayName: 'ModelScope', type: 'research_lab', status: 'active', articleCount: stats['ModelScope Releases'] || 0 },
   { name: 'techcrunch', displayName: 'TechCrunch', type: 'news', status: 'active', articleCount: stats['TechCrunch AI'] || 0 },
   { name: 'venturebeat', displayName: 'VentureBeat', type: 'news', status: 'active', articleCount: stats['VentureBeat AI'] || 0 },
   { name: 'arc_official', displayName: 'ARC Prize Leaderboard', type: 'benchmark', status: 'active', lastCheck: new Date().toISOString() },
@@ -330,7 +339,8 @@ export default function Home(): React.ReactElement {
         setCrawlResults(prev => [...prev, ...data.data]);
         const now = new Date();
         setLastCrawlTime(now.toISOString());
-        
+        updateCache({ lastCrawlTime: now.toISOString() });
+
         const nextCrawl = new Date(now.getTime() + 24 * 60 * 60 * 1000);
         setNextScheduledCrawl(nextCrawl.toISOString());
         
@@ -385,11 +395,12 @@ export default function Home(): React.ReactElement {
   const loadExistingData = async () => {
     try {
       const cached = readCache();
+      const cachedLastCrawlTime = cached?.lastCrawlTime || null;
       if (cached) {
         setCrawlResults(cached.crawlResults || []);
         setAnalyses(cached.analyses || []);
         setSourceStats(cached.sourceStats || {});
-        setLastCrawlTime(cached.lastCrawlTime || null);
+        setLastCrawlTime(cachedLastCrawlTime || null);
         setMonitoringSourceStatus(buildMonitoringStatus(cached.sourceStats || {}));
         setIsInitialLoading(false);
       }
@@ -402,14 +413,30 @@ export default function Home(): React.ReactElement {
         setCrawlResults(data.data.crawlResults);
         setAnalyses(data.data.analyses);
         setSourceStats(data.data.sourceStats);
-        if (data.data.latestCrawlTime) {
-          setLastCrawlTime(data.data.latestCrawlTime);
+        const latestFromResults = (data.data.crawlResults || []).reduce((latest: string | null, item: any) => {
+          if (!item?.timestamp) return latest;
+          const ts = new Date(item.timestamp).toISOString();
+          if (!latest) return ts;
+          return new Date(ts).getTime() > new Date(latest).getTime() ? ts : latest;
+        }, null as string | null);
+        const candidateTimes = [
+          data.data.latestCrawlTime || null,
+          data.data.lastCrawlRunAt || null,
+          latestFromResults,
+          cachedLastCrawlTime || null,
+          lastCrawlTime || null
+        ].filter(Boolean) as string[];
+        const latestTime = candidateTimes.length > 0
+          ? candidateTimes.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
+          : null;
+        if (latestTime) {
+          setLastCrawlTime(latestTime);
         }
         updateCache({
           crawlResults: data.data.crawlResults,
           analyses: data.data.analyses,
           sourceStats: data.data.sourceStats,
-          lastCrawlTime: data.data.latestCrawlTime
+          lastCrawlTime: latestTime || data.data.latestCrawlTime
         });
         setDataLoadError(null);
         addLog(`Loaded ${data.data.totalArticles} articles and ${data.data.totalAnalyses} analyses`);
@@ -944,7 +971,22 @@ export default function Home(): React.ReactElement {
                   const tb = new Date(b.timestamp || 0).getTime();
                   return tb - ta;
                 })
-                .map((analysis) => (
+                .map((analysis) => {
+                  const breakdown = (analysis.scoreBreakdown || {}) as Record<string, unknown>;
+                  const secrecyBoost = typeof breakdown.secrecyBoost === 'number' ? breakdown.secrecyBoost : 0;
+                  const corroborationPenalty = typeof breakdown.corroborationPenalty === 'number' ? breakdown.corroborationPenalty : 0;
+                  const filteredReason = typeof breakdown.filterReason === 'string' ? breakdown.filterReason : null;
+                  const claims = analysis.crawl?.metadata?.evidence?.claims || [];
+                  const deltaClaims = claims.filter(c => c.benchmark && typeof c.delta === 'number');
+                  const snippetCount = analysis.crawl?.metadata?.evidence?.snippets?.length || 0;
+                  const severityKey = (analysis.severity || '').toLowerCase();
+                  const isHighSignal = severityKey === 'high' || severityKey === 'critical';
+                  const hasBenchmarkDelta = deltaClaims.length > 0;
+                  const potentialSignal = isHighSignal && hasBenchmarkDelta;
+                  const modelScoreValue = typeof analysis.modelScore === 'number' ? analysis.modelScore : 0;
+                  const heuristicScoreValue = typeof analysis.heuristicScore === 'number' ? analysis.heuristicScore : 0;
+
+                  return (
                 <div id={`analysis-card-${analysis.id}`} key={analysis.id} className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)] shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center space-x-4">
@@ -972,6 +1014,13 @@ export default function Home(): React.ReactElement {
                           'bg-gray-50 text-gray-600'
                         }`}>
                           {analysis.severity.toUpperCase()}
+                        </span>
+                      )}
+                      {isHighSignal && (
+                        <span className={`text-xs font-medium px-2 py-1 rounded ${
+                          potentialSignal ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-600'
+                        }`}>
+                          {potentialSignal ? 'POTENTIAL AGI SIGNAL' : 'UNVERIFIED (NO BENCHMARK Δ)'}
                         </span>
                       )}
                       {analysis.evidenceQuality && (
@@ -1004,6 +1053,15 @@ export default function Home(): React.ReactElement {
                         </div>
                       );
                     })()}
+                  </div>
+
+                  <div className="text-xs text-[var(--muted)] mb-4">
+                    Breakdown: Model {(modelScoreValue * 100).toFixed(0)}% ·
+                    Heuristic {(heuristicScoreValue * 100).toFixed(0)}% ·
+                    Secrecy +{(secrecyBoost * 100).toFixed(0)}% ·
+                    Corroboration -{(corroborationPenalty * 100).toFixed(0)}% ·
+                    Evidence {claims.length} claims (Δ: {deltaClaims.length}) · {snippetCount} snippets
+                    {filteredReason && ` · Filtered: ${filteredReason}`}
                   </div>
                   
                   {analysis.indicators.length > 0 && (
@@ -1103,7 +1161,8 @@ export default function Home(): React.ReactElement {
 
                   <p className="text-sm text-[var(--muted)] leading-relaxed">{analysis.explanation}</p>
                 </div>
-              ))
+                  );
+                })
             )}
           </div>
         )}

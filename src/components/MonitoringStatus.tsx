@@ -25,9 +25,17 @@ const defaultSources: SourceStatus[] = [
   { name: 'deepmind', displayName: 'DeepMind', type: 'research_lab', status: 'active', url: 'deepmind.com' },
   { name: 'anthropic', displayName: 'Anthropic', type: 'research_lab', status: 'active', url: 'anthropic.com' },
   { name: 'microsoft', displayName: 'Microsoft AI', type: 'corporate', status: 'active', url: 'microsoft.com/ai' },
+  { name: 'baai', displayName: 'BAAI', type: 'research_lab', status: 'active', url: 'baai.ac.cn' },
+  { name: 'bytedance_seed', displayName: 'ByteDance Seed', type: 'research_lab', status: 'active', url: 'seed.bytedance.com' },
+  { name: 'tencent_ai_lab', displayName: 'Tencent AI Lab', type: 'research_lab', status: 'active', url: 'tencent.net.cn' },
+  { name: 'shlab', displayName: 'Shanghai AI Lab', type: 'research_lab', status: 'active', url: 'shlab.org.cn' },
+  { name: 'qwen', displayName: 'Qwen Releases', type: 'research_lab', status: 'active', url: 'github.com/QwenLM/Qwen' },
+  { name: 'huawei_noah', displayName: 'Huawei Noah', type: 'research_lab', status: 'active', url: 'github.com/huawei-noah/noah-research' },
+  { name: 'modelscope', displayName: 'ModelScope', type: 'research_lab', status: 'active', url: 'github.com/modelscope/modelscope' },
 
   // Academic & News
   { name: 'arxiv', displayName: 'arXiv AI', type: 'academic', status: 'active', url: 'arxiv.org' },
+  { name: 'chinaxiv', displayName: 'ChinaXiv', type: 'academic', status: 'active', url: 'chinaxiv.org' },
   { name: 'techcrunch', displayName: 'TechCrunch', type: 'news', status: 'active', url: 'techcrunch.com' },
   { name: 'venturebeat', displayName: 'VentureBeat', type: 'news', status: 'active', url: 'venturebeat.com' },
 

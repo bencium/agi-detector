@@ -115,6 +115,91 @@ export const SOURCES = {
       isAnthropicResearch: true, // Special handling for Anthropic's React SPA research page
     },
   ],
+  CHINA_LABS: [
+    {
+      name: 'BAAI Research',
+      url: 'https://www.baai.ac.cn/en/research',
+      selector: 'main a',
+      titleSelector: 'h3, h2, .title',
+      contentSelector: 'p, .summary, .desc',
+      linkSelector: '',
+      playwrightFirst: true,
+      playwrightRetries: 2,
+      autoDiscover: true
+    },
+    {
+      name: 'ByteDance Seed Research',
+      url: 'https://seed.bytedance.com/en/research',
+      selector: 'main a',
+      titleSelector: 'h3, h2, .title',
+      contentSelector: 'p, .summary, .desc',
+      linkSelector: '',
+      playwrightFirst: true,
+      playwrightRetries: 2,
+      autoDiscover: true
+    },
+    {
+      name: 'Tencent AI Lab',
+      url: 'https://www.tencent.net.cn/products/artificial-intelligence/',
+      selector: 'main a',
+      titleSelector: 'h3, h2, .title',
+      contentSelector: 'p, .summary, .desc',
+      linkSelector: '',
+      playwrightFirst: true,
+      playwrightRetries: 2,
+      autoDiscover: true
+    },
+    {
+      name: 'Shanghai AI Lab',
+      url: 'https://www.shlab.org.cn/',
+      selector: 'main a',
+      titleSelector: 'h3, h2, .title',
+      contentSelector: 'p, .summary, .desc',
+      linkSelector: '',
+      playwrightFirst: true,
+      playwrightRetries: 2,
+      autoDiscover: true
+    }
+  ],
+  CHINA_ACADEMIC: [
+    {
+      name: 'ChinaXiv',
+      url: 'https://www.chinaxiv.org/',
+      selector: 'main a',
+      titleSelector: 'h3, h2, .title',
+      contentSelector: 'p, .summary, .desc',
+      linkSelector: '',
+      playwrightFirst: true,
+      playwrightRetries: 2,
+      autoDiscover: true
+    }
+  ],
+  CHINA_MODEL_RELEASES: [
+    {
+      name: 'Qwen GitHub Releases',
+      url: 'https://github.com/QwenLM/Qwen/releases',
+      selector: 'article',
+      titleSelector: 'a.Link--primary',
+      contentSelector: 'div.markdown-body',
+      linkSelector: 'a.Link--primary'
+    },
+    {
+      name: 'Huawei Noah Research',
+      url: 'https://github.com/huawei-noah/noah-research/releases',
+      selector: 'article',
+      titleSelector: 'a.Link--primary',
+      contentSelector: 'div.markdown-body',
+      linkSelector: 'a.Link--primary'
+    },
+    {
+      name: 'ModelScope Releases',
+      url: 'https://github.com/modelscope/modelscope/releases',
+      selector: 'article',
+      titleSelector: 'a.Link--primary',
+      contentSelector: 'div.markdown-body',
+      linkSelector: 'a.Link--primary'
+    }
+  ]
 };
 
 const rateLimiter = new RateLimiter();
@@ -138,6 +223,9 @@ type Source = {
   isSpecial?: boolean;
   isAnthropicNews?: boolean; // Special handling for Anthropic's React SPA (news/blog)
   isAnthropicResearch?: boolean; // Special handling for Anthropic's React SPA (research papers)
+  playwrightFirst?: boolean;
+  playwrightRetries?: number;
+  autoDiscover?: boolean;
   transform?: {
     title?: (text: string) => string;
     content?: (text: string) => string;
@@ -304,7 +392,10 @@ export async function crawlAllSources(): Promise<CrawledArticle[]> {
   const sourcesToCrawl = [
     ...SOURCES.RESEARCH_BLOGS,
     ...SOURCES.NEWS_SITES,
-    ...SOURCES.ACADEMIC
+    ...SOURCES.ACADEMIC,
+    ...(SOURCES.CHINA_LABS || []),
+    ...(SOURCES.CHINA_ACADEMIC || []),
+    ...(SOURCES.CHINA_MODEL_RELEASES || [])
   ];
 
   console.log(`[Crawler] Starting crawl of ${sourcesToCrawl.length} sources...`);

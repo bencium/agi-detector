@@ -10,6 +10,7 @@ export type ScoreBreakdown = {
   modelScore: number;
   heuristicScore: number;
   secrecyBoost: number;
+  corroborationPenalty?: number;
   combinedScore: number;
   weights: {
     model: number;
@@ -100,11 +101,13 @@ export function computeCombinedScore(input: {
   modelScore: number;
   heuristicScore: number;
   secrecyBoost?: number;
+  corroborationPenalty?: number;
   signals?: HeuristicSignal[];
 }): { combinedScore: number; breakdown: ScoreBreakdown } {
   const secrecyBoost = input.secrecyBoost || 0;
+  const corroborationPenalty = input.corroborationPenalty || 0;
   const weighted = input.modelScore * MODEL_WEIGHT + input.heuristicScore * HEURISTIC_WEIGHT;
-  const combined = clamp(Math.max(input.modelScore, weighted) + secrecyBoost, 0, 1);
+  const combined = clamp(Math.max(input.modelScore, weighted) + secrecyBoost - corroborationPenalty, 0, 1);
 
   return {
     combinedScore: combined,
@@ -112,6 +115,7 @@ export function computeCombinedScore(input: {
       modelScore: input.modelScore,
       heuristicScore: input.heuristicScore,
       secrecyBoost,
+      corroborationPenalty,
       combinedScore: combined,
       weights: { model: MODEL_WEIGHT, heuristic: HEURISTIC_WEIGHT },
       signals: input.signals || []

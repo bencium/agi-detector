@@ -44,6 +44,13 @@ ALTER TABLE "TrendAnalysis" ADD COLUMN IF NOT EXISTS "dateBucket" DATE;
 CREATE UNIQUE INDEX IF NOT EXISTS "TrendAnalysis_period_dateBucket_key"
   ON "TrendAnalysis"(period, "dateBucket");
 
+-- App state (last crawl run time, etc.)
+CREATE TABLE IF NOT EXISTS "AppState" (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Evidence claims table
 CREATE TABLE IF NOT EXISTS "EvidenceClaim" (
     id TEXT NOT NULL DEFAULT gen_random_uuid(),

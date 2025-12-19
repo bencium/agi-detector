@@ -30,7 +30,15 @@ const KEYWORDS = [
   'generalization',
   'emergent',
   'novel',
-  'breakthrough'
+  'breakthrough',
+  '基准',
+  '评测',
+  '人类水平',
+  '泛化',
+  '涌现',
+  '突破',
+  '新方法',
+  '新架构'
 ];
 
 const BENCHMARKS = [
@@ -79,7 +87,7 @@ const METRICS = [
 function splitIntoSentences(text: string): string[] {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return [];
-  const rough = normalized.split(/(?<=[.!?])\s+/);
+  const rough = normalized.split(/(?<=[.!?。！？；])\s+/);
   return rough.map(s => s.trim()).filter(Boolean);
 }
 

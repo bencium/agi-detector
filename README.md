@@ -7,8 +7,19 @@
 An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news.
 
 ## ✨ Recent Improvements
-- **Evidence-gated severity**: Critical alerts now require real benchmark deltas (reduces false positives).
-- **Smarter anomalies**: Anomaly detection clusters by source type and filters out low-AGI-score noise.
+- **Layer-0 noise filter**: Cheap triage skips obvious non-capability updates before LLM analysis.
+- **Evidence-gated severity**: Critical alerts require real benchmark deltas to reduce false positives.
+- **Corroboration penalties**: Unverified high-claims get a score penalty during validation.
+- **Score transparency**: UI shows model vs heuristic scores, secrecy boost, evidence counts, and penalties.
+- **Smarter anomalies**: Source-grouped clustering + minimum AGI score threshold reduce noise.
+- **CJK normalization**: Chinese text gets tokenization support and optional translation for consistent indicators.
+- **Playwright retries**: Gated sources use Playwright with retries for better coverage.
+
+## 🧭 Roadmap (Next)
+- Improve selectors and stability for China lab pages (BAAI, ByteDance Seed, Tencent AI Lab, Shanghai AI Lab).
+- Add ChinaXiv parsing refinements (author/date extraction + canonicalization).
+- Expand bilingual evidence extraction + translation for mixed Chinese/English releases.
+- Add learning loop (ruvector or agentdb): feedback-driven retrain or reranker to adapt thresholds over time.
 
 ## 🎯 Project Vision
 
@@ -19,8 +30,8 @@ A sophisticated early-warning system that monitors the AI landscape for genuine 
 ## 🚀 Key Features
 
 ### Core Monitoring
-- **Multi-Source Crawling**: Successfully monitors all 7 major AI sources (OpenAI, DeepMind, Anthropic, Microsoft AI, arXiv, TechCrunch, VentureBeat)
-- **GPT-4.1-mini Powered Analysis**: Uses cost-efficient GPT-4.1-mini model for sophisticated AGI indicator detection
+- **Multi-Source Crawling**: Monitors major labs, academic hubs, and model releases (OpenAI, DeepMind, Anthropic, Microsoft AI, arXiv, BAAI, ByteDance Seed, Tencent AI Lab, Shanghai AI Lab, ChinaXiv, Qwen, Huawei Noah, ModelScope)
+- **GPT-5-mini Powered Analysis**: Uses GPT-5-mini for more robust AGI indicator detection
 - **Real-time Console Output**: Detailed logging shows every article being analyzed, batch progress, and errors
 - **Enhanced Processing Indicators**: Glowing button animation and automatic console expansion during analysis
 - **Real-time Alerts**: Automated detection and severity classification (none/low/medium/high/critical)

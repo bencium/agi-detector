@@ -12,6 +12,9 @@ import { upsertTrendSnapshot } from '@/lib/trends';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
 import { computeCombinedScore, computeHeuristicScore, hasBenchmarkDelta } from '@/lib/scoring/multiSignal';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
+import { runLayer0Triage } from '@/lib/analysis/triage';
+import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
+import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
 
 interface CrawlResult {
   id: string;
@@ -126,15 +129,115 @@ export async function POST(request: NextRequest) {
     const timestamp = metadata?.timestamp || new Date().toISOString();
     const evidenceSnippets = metadata?.evidence?.snippets || [];
 
+    const triage = runLayer0Triage({
+      title: latestCrawl.title,
+      content: latestCrawl.content,
+      source: sourceName
+    });
+
+    if (triage.skip) {
+      await ensureAnalysisScoreSchema();
+      const filteredScore = 0.05;
+      const filteredConfidence = 0.9;
+      const filteredExplanation = `Layer-0 noise filter: ${triage.reason || 'No capability signals detected'}`;
+      const filteredBreakdown = {
+        modelScore: 0,
+        heuristicScore: 0,
+        secrecyBoost: 0,
+        corroborationPenalty: 0,
+        combinedScore: filteredScore,
+        weights: {
+          model: parseFloat(process.env.MODEL_SCORE_WEIGHT || '0.85'),
+          heuristic: parseFloat(process.env.HEURISTIC_SCORE_WEIGHT || '0.15')
+        },
+        signals: [],
+        filtered: true,
+        filterReason: triage.reason || 'noise'
+      };
+
+      const filteredAnalysis = await insert<AnalysisResult>(
+        `INSERT INTO "AnalysisResult"
+         (id, "crawlId", score, confidence, indicators, severity, "evidenceQuality", "requiresVerification", "crossReferences", explanation, embedding, "modelScore", "heuristicScore", "scoreBreakdown")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, $13::jsonb)
+         RETURNING id, "crawlId", score, confidence, indicators, severity, explanation, timestamp`,
+        [
+          latestCrawl.id,
+          filteredScore,
+          filteredConfidence,
+          [],
+          'low',
+          'filtered',
+          false,
+          [],
+          filteredExplanation,
+          null,
+          0,
+          0,
+          JSON.stringify(filteredBreakdown)
+        ]
+      );
+
+      if (!filteredAnalysis) {
+        throw new Error('Failed to save filtered analysis');
+      }
+
+      await insert(
+        `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+        [filteredAnalysis.id, 'score', filteredScore]
+      );
+      await insert(
+        `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+        [filteredAnalysis.id, 'model_score', 0]
+      );
+      await insert(
+        `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+        [filteredAnalysis.id, 'heuristic_score', 0]
+      );
+      await insert(
+        `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+        [filteredAnalysis.id, 'confidence', filteredConfidence]
+      );
+      await insert(
+        `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+        [filteredAnalysis.id, 'indicator_count', 0]
+      );
+      await updateTrendAnalysis();
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...filteredAnalysis,
+          explanation: filteredExplanation,
+          skipped: true
+        }
+      });
+    }
+
+    const translationEnabled = process.env.CHINESE_TRANSLATION_ENABLED !== 'false';
+    let translatedSnippets: string[] = [];
+    let translatedTitle = '';
+    if (translationEnabled && shouldTranslateCjk(`${latestCrawl.title} ${latestCrawl.content}`)) {
+      try {
+        const translation = await translateToEnglish({
+          title: latestCrawl.title,
+          snippets: evidenceSnippets.slice(0, 6)
+        });
+        translatedTitle = translation.translatedTitle || '';
+        translatedSnippets = translation.translatedSnippets || [];
+      } catch (err) {
+        console.warn('[Translate] Failed to translate evidence snippets:', err);
+      }
+    }
+
     // Analyze content using OpenAI
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const model = process.env.OPENAI_MODEL || "gpt-5-mini";
     const options = {
       model,
       messages: [
         { role: "system" as const, content: AGI_DETECTION_PROMPT },
         {
           role: "user" as const,
-          content: `Title: ${latestCrawl.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n\nContent: ${latestCrawl.content}`
+          content: `Title: ${latestCrawl.title}\n${translatedTitle ? `Translated Title: ${translatedTitle}\n` : ''}\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n${translatedSnippets.length > 0 ? `\nTranslated Evidence:\n${translatedSnippets.map(s => `- ${s}`).join('\n')}\n` : ''}\nContent: ${latestCrawl.content}`
         }
       ],
       response_format: { type: "json_object" as const }
@@ -148,6 +251,7 @@ export async function POST(request: NextRequest) {
 
     const analysisResult = parseOpenAIResponse(content);
     const modelScore = analysisResult.score || 0;
+    const crossReferences = analysisResult.cross_references || [];
 
     // Run silence detection
     const secrecyIndicators = analyzeForSecrecyIndicators(
@@ -164,6 +268,20 @@ export async function POST(request: NextRequest) {
       ...allSecrecyIndicators.map((si: SecrecyIndicator) => `[SECRECY] ${si.description}`)
     ];
 
+    let corroborationPenalty = 0;
+    if (crossReferences.length > 0) {
+      const normalizedRefs = crossReferences.map(r => r.toLowerCase());
+      const refMatches = await query<{ count: number }>(
+        `SELECT COUNT(*)::int as count
+         FROM "CrawlResult"
+         WHERE LOWER(metadata->>'source') = ANY($1)`,
+        [normalizedRefs]
+      );
+      if (!refMatches[0]?.count) {
+        corroborationPenalty = 0.15;
+      }
+    }
+
     // Boost score for secrecy patterns
     let secrecyBoost = 0;
     const criticalSecrecy = allSecrecyIndicators.filter((si: SecrecyIndicator) => si.severity === 'critical').length;
@@ -176,8 +294,14 @@ export async function POST(request: NextRequest) {
     }
 
     const claims = metadata?.evidence?.claims || [];
+    let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
+    if (translatedSnippets.length > 0) {
+      const snippetObjects: EvidenceSnippet[] = translatedSnippets.map(text => ({ text, score: 1, tags: [] }));
+      translatedClaims = extractEvidenceClaims(snippetObjects);
+    }
+    const mergedClaims = [...claims, ...translatedClaims];
     const heuristic = computeHeuristicScore({
-      claims,
+      claims: mergedClaims,
       snippetsCount: metadata?.evidence?.snippets?.length || 0
     });
 
@@ -185,14 +309,18 @@ export async function POST(request: NextRequest) {
     if (secrecyBoost > 0) {
       signals.push({ name: 'secrecy', value: secrecyBoost, detail: criticalSecrecy > 0 ? 'critical' : 'high' });
     }
+    if (corroborationPenalty > 0) {
+      signals.push({ name: 'corroboration_penalty', value: -corroborationPenalty, detail: 'no corroboration' });
+    }
     const combined = computeCombinedScore({
       modelScore,
       heuristicScore: heuristic.score,
       secrecyBoost,
+      corroborationPenalty,
       signals
     });
 
-    const hasDelta = hasBenchmarkDelta(claims);
+    const hasDelta = hasBenchmarkDelta(mergedClaims);
     let severity = computeSeverity(combined.combinedScore, analysisResult.severity);
     severity = enforceCriticalEvidenceGate(severity, hasDelta);
 
@@ -221,7 +349,7 @@ export async function POST(request: NextRequest) {
         severity,
         analysisResult.evidence_quality || 'speculative',
         analysisResult.requires_verification || criticalSecrecy > 0,
-        analysisResult.cross_references || [],
+        crossReferences,
         analysisResult.explanation || 'No analysis available',
         embeddingValue,
         modelScore,

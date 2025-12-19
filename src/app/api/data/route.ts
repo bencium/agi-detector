@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query, isDbEnabled } from '@/lib/db';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
+import { getLastCrawlRunAt } from '@/lib/state/appState';
 
 interface CrawlResult {
   id: string;
@@ -101,6 +102,7 @@ export async function GET() {
     }));
 
     const latestCrawl = crawlResults.length > 0 ? crawlResults[0] : null;
+    const lastCrawlRunAt = await getLastCrawlRunAt();
 
     return NextResponse.json({
       success: true,
@@ -110,6 +112,7 @@ export async function GET() {
         analyses: formattedAnalyses,
         sourceStats,
         latestCrawlTime: latestCrawl?.timestamp || null,
+        lastCrawlRunAt,
         totalArticles: crawlResults.length,
         totalAnalyses: analyses.length
       }

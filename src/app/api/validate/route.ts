@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { query, queryOne, execute, isDbEnabled } from '@/lib/db';
 import { openai } from '@/lib/openai';
 import { crawlSource, SOURCES } from '@/lib/crawler';
-import { applyValidationOverride, computeSeverity, enforceCriticalEvidenceGate } from '@/lib/severity';
+import { applyValidationOverride, enforceCriticalEvidenceGate, severityForScore } from '@/lib/severity';
 import { safeJsonParse } from '@/lib/utils/safeJson';
 import { z } from 'zod';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
@@ -13,6 +13,8 @@ import {
   analyzeResearcherDepartures,
   SecrecyIndicator
 } from '@/lib/detection/silence-patterns';
+import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
+import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
 
 const validateRequestSchema = z.object({
   analysisId: z.string().uuid('Invalid analysis ID format')
@@ -127,14 +129,27 @@ export async function POST(request: Request) {
       .replace('{severity}', analysis.severity || 'none');
 
     const evidenceSnippets = analysis.metadata?.evidence?.snippets || [];
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const translationEnabled = process.env.CHINESE_TRANSLATION_ENABLED !== 'false';
+    let translatedSnippets: string[] = [];
+    if (translationEnabled && shouldTranslateCjk(`${analysis.title} ${analysis.content}`)) {
+      try {
+        const translation = await translateToEnglish({
+          title: analysis.title,
+          snippets: evidenceSnippets.slice(0, 6)
+        });
+        translatedSnippets = translation.translatedSnippets || [];
+      } catch (err) {
+        console.warn('[Translate] Failed to translate evidence snippets:', err);
+      }
+    }
+    const model = process.env.OPENAI_MODEL || "gpt-5-mini";
     const vOptions = {
       model,
       messages: [
         { role: "system" as const, content: validationPrompt },
         {
           role: "user" as const,
-          content: `Title: ${analysis.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n\nContent: ${analysis.content}`
+          content: `Title: ${analysis.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n${translatedSnippets.length > 0 ? `\nTranslated Evidence:\n${translatedSnippets.map(s => `- ${s}`).join('\n')}\n` : ''}\nContent: ${analysis.content}`
         }
       ],
       response_format: { type: "json_object" as const }
@@ -160,11 +175,22 @@ export async function POST(request: Request) {
     if (analysis.severity === 'high' || analysis.severity === 'critical') {
       crossReferenceResults = await checkCrossReferences(analysis.crossReferences);
     }
+    const checkedCrossRefs = analysis.severity === 'high' || analysis.severity === 'critical';
+    const hasCrossRefs = (analysis.crossReferences || []).length > 0;
+    const hasCorroboration = crossReferenceResults.some(r => r.found);
+    const corroborationPenalty = checkedCrossRefs && hasCrossRefs && !hasCorroboration ? 0.2 : 0;
 
     // Calculate final score and confidence
     const modelScore = validationResult.validatedScore || analysis.modelScore || analysis.score;
+    const claims = analysis.metadata?.evidence?.claims || [];
+    let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
+    if (translatedSnippets.length > 0) {
+      const snippetObjects: EvidenceSnippet[] = translatedSnippets.map(text => ({ text, score: 1, tags: [] }));
+      translatedClaims = extractEvidenceClaims(snippetObjects);
+    }
+    const mergedClaims = [...claims, ...translatedClaims];
     const heuristic = computeHeuristicScore({
-      claims: analysis.metadata?.evidence?.claims || [],
+      claims: mergedClaims,
       snippetsCount: analysis.metadata?.evidence?.snippets?.length || 0
     });
 
@@ -188,14 +214,19 @@ export async function POST(request: Request) {
     if (secrecyBoost > 0) {
       signals.push({ name: 'secrecy', value: secrecyBoost, detail: criticalSecrecy > 0 ? 'critical' : 'high' });
     }
+    if (corroborationPenalty > 0) {
+      signals.push({ name: 'corroboration_penalty', value: -corroborationPenalty, detail: 'no corroboration' });
+    }
     const combined = computeCombinedScore({
       modelScore,
       heuristicScore: heuristic.score,
       secrecyBoost,
+      corroborationPenalty,
       signals
     });
 
-    const finalScore = Math.max(analysis.score, combined.combinedScore);
+    const penaltyAdjustedPrior = Math.max(0, analysis.score - corroborationPenalty);
+    const finalScore = Math.max(penaltyAdjustedPrior, combined.combinedScore);
 
     const prevConfidence = analysis.confidence;
     const addedIndicators = (validationResult.additionalIndicators || []).length;
@@ -210,11 +241,12 @@ export async function POST(request: Request) {
       recommendation: validationResult.recommendation || 'investigate',
       timestamp: new Date().toISOString(),
       modelScore,
-      heuristicScore: heuristic.score
+      heuristicScore: heuristic.score,
+      corroborationPenalty
     };
 
-    const hasDelta = hasBenchmarkDelta(analysis.metadata?.evidence?.claims || []);
-    let newSeverity = computeSeverity(finalScore, (analysis.severity || 'none') as 'none' | 'low' | 'medium' | 'high' | 'critical');
+    const hasDelta = hasBenchmarkDelta(mergedClaims);
+    let newSeverity = severityForScore(finalScore);
     newSeverity = enforceCriticalEvidenceGate(newSeverity, hasDelta);
     newSeverity = applyValidationOverride(newSeverity, validationResult.recommendation);
 
@@ -283,7 +315,10 @@ async function checkCrossReferences(references: string[]): Promise<Array<{
     const allSources = [
       ...SOURCES.RESEARCH_BLOGS,
       ...SOURCES.NEWS_SITES,
-      ...SOURCES.ACADEMIC
+      ...SOURCES.ACADEMIC,
+      ...(SOURCES.CHINA_LABS || []),
+      ...(SOURCES.CHINA_ACADEMIC || []),
+      ...(SOURCES.CHINA_MODEL_RELEASES || [])
     ];
 
     const source = allSources.find(s => s.name.toLowerCase().includes(ref.toLowerCase()));

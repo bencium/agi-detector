@@ -14,7 +14,12 @@ const BLOCKED_SOURCES = [
   'DeepMind Research',
   'Anthropic Blog',
   'Anthropic Research', // Research papers page (also React SPA)
-  'Microsoft AI Blog'
+  'Microsoft AI Blog',
+  'BAAI Research',
+  'ByteDance Seed Research',
+  'Tencent AI Lab',
+  'Shanghai AI Lab',
+  'ChinaXiv'
 ];
 
 interface CrawledArticle {
@@ -49,6 +54,11 @@ interface CrawlStrategy {
   name: string;
   execute: () => Promise<CrawledArticle[]>;
 }
+
+type AutoDiscoverConfig = {
+  autoDiscover?: boolean;
+  name?: string;
+};
 
 // Rate limiter: 1 request per 2 seconds
 const limiter = new Limiter({ tokensPerInterval: 1, interval: 2000 });
@@ -104,18 +114,27 @@ async function parseRSSFeed(url: string, sourceName: string): Promise<CrawledArt
     const parsed = await parseStringPromise(response.data);
     const items = parsed.rss?.channel?.[0]?.item || parsed.feed?.entry || [];
     
+    const toText = (value: any): string => {
+      if (!value) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'object' && typeof value._ === 'string') return value._;
+      return '';
+    };
+
     return items.map((item: any) => {
-      const title = item.title?.[0]?._ || item.title?.[0] || '';
-      const content = item.description?.[0] || item.summary?.[0] || item.content?.[0] || '';
+      const title = toText(item.title?.[0]) || '';
+      const content = toText(item.description?.[0]) || toText(item.summary?.[0]) || toText(item.content?.[0]) || '';
       const url = item.link?.[0]?.$ ?.href || item.link?.[0] || item.guid?.[0] || '';
       const publishedAt = item.pubDate?.[0] || item.updated?.[0];
+      const author = item.author?.[0] || item['dc:creator']?.[0] || item.creator?.[0] || '';
       const id = item.guid?.[0] || item.id?.[0] || `${sourceName}-${Date.now()}`;
       const metadata = buildCrawlMetadata({
         source: sourceName,
         url,
-        content,
+        content: content || title,
         title,
         publishedAt,
+        author,
         id
       });
 
@@ -193,6 +212,11 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
     // Random delay to appear more human
     await delay(getRandomDelay());
     
+    if (selectors.autoDiscover) {
+      const html = await page.content();
+      return discoverArticlesFromHtml(html, url, selectors as AutoDiscoverConfig);
+    }
+
     // Extract articles
     const articles = await page.evaluate((sel) => {
       const results: any[] = [];
@@ -250,6 +274,63 @@ async function crawlWithBrowser(url: string, selectors: any): Promise<CrawledArt
   }
 }
 
+function discoverArticlesFromHtml(html: string, baseUrl: string, config: AutoDiscoverConfig): CrawledArticle[] {
+  const $ = cheerio.load(html);
+  const candidates: CrawledArticle[] = [];
+  const dateRegex = /(\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?)/;
+
+  $('article, li, div').each((_, element) => {
+    const $el = $(element);
+    const text = $el.text().replace(/\s+/g, ' ').trim();
+    if (text.length < 40) return;
+
+    const link = $el.find('a[href]').first();
+    const href = link.attr('href') || '';
+    if (!href) return;
+
+    const title = link.text().replace(/\s+/g, ' ').trim();
+    if (title.length < 6) return;
+
+    const dateMatch = text.match(dateRegex);
+    const url = href.startsWith('http') ? href : new URL(href, baseUrl).href;
+    candidates.push({
+      title,
+      content: text.slice(0, 500),
+      url,
+      metadata: buildCrawlMetadata({
+        source: config.name || 'Unknown',
+        url,
+        content: text,
+        title,
+        publishedAt: dateMatch?.[0]
+      })
+    });
+  });
+
+  const deduped = new Map<string, CrawledArticle>();
+  for (const candidate of candidates) {
+    const key = candidate.url || candidate.title.toLowerCase();
+    if (!deduped.has(key)) deduped.set(key, candidate);
+  }
+
+  return Array.from(deduped.values()).slice(0, 20);
+}
+
+async function crawlWithBrowserWithRetries(url: string, selectors: any): Promise<CrawledArticle[]> {
+  const retries = selectors.playwrightRetries ?? 0;
+  const maxAttempts = Math.max(1, retries + 1);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const articles = await crawlWithBrowser(url, selectors);
+    if (articles.length > 0) return articles;
+    if (attempt < maxAttempts) {
+      const waitMs = 1000 * attempt;
+      console.log(`[Browser] Retry ${attempt}/${maxAttempts} after ${waitMs}ms for ${url}`);
+      await delay(waitMs);
+    }
+  }
+  return [];
+}
+
 // API endpoints to try - verified working RSS feeds
 const API_ENDPOINTS: Record<string, string[]> = {
   'OpenAI Blog': [
@@ -284,6 +365,19 @@ const API_ENDPOINTS: Record<string, string[]> = {
   'arXiv AI': [
     'http://export.arxiv.org/rss/cs.AI',
     'https://export.arxiv.org/rss/cs.AI'
+  ],
+  'Qwen GitHub Releases': [
+    'https://github.com/QwenLM/Qwen/tags.atom',
+    'https://github.com/QwenLM/Qwen/commits/main.atom',
+    'https://github.com/QwenLM/Qwen/commits/master.atom'
+  ],
+  'Huawei Noah Research': [
+    'https://github.com/huawei-noah/noah-research/tags.atom',
+    'https://github.com/huawei-noah/noah-research/commits/main.atom',
+    'https://github.com/huawei-noah/noah-research/commits/master.atom'
+  ],
+  'ModelScope Releases': [
+    'https://github.com/modelscope/modelscope/releases.atom'
   ]
 };
 
@@ -322,6 +416,17 @@ export class AdvancedCrawler {
       }
     });
 
+    if (this.source.playwrightFirst) {
+      strategies.push({
+        name: 'Playwright (Priority)',
+        execute: async () => {
+          console.log(`[${this.source.name}] Using Playwright with retries (priority)`);
+          await limiter.removeTokens(1);
+          return await crawlWithBrowserWithRetries(this.source.url, this.source);
+        }
+      });
+    }
+
     // Strategy 2: For BLOCKED sources, use Playwright immediately after RSS fails
     if (isBlockedSource) {
       strategies.push({
@@ -329,7 +434,7 @@ export class AdvancedCrawler {
         execute: async () => {
           console.log(`[${this.source.name}] Using Playwright for blocked source`);
           await limiter.removeTokens(1);
-          return await crawlWithBrowser(this.source.url, this.source);
+          return await crawlWithBrowserWithRetries(this.source.url, this.source);
         }
       });
     }
@@ -398,7 +503,7 @@ export class AdvancedCrawler {
         execute: async () => {
           console.log(`[${this.source.name}] Using Playwright as fallback`);
           await limiter.removeTokens(1);
-          return await crawlWithBrowser(this.source.url, this.source);
+          return await crawlWithBrowserWithRetries(this.source.url, this.source);
         }
       });
     }

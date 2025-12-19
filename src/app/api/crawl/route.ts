@@ -3,6 +3,7 @@ import { query, insert, isDbEnabled } from '@/lib/db';
 import { crawlAllSources } from '@/lib/crawler';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
 import { upsertEvidenceClaims } from '@/lib/evidence/storage';
+import { setLastCrawlRunAt } from '@/lib/state/appState';
 
 interface CrawlResult {
   id: string;
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest) {
 
     const crawledResults = await crawlAllSources();
     console.log(`[Crawler API] Successfully crawled ${crawledResults.length} articles`);
+    await setLastCrawlRunAt(new Date().toISOString());
 
     const savedResults: CrawlResult[] = [];
 

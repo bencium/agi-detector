@@ -5,6 +5,9 @@ import { parseOpenAIResponse } from '@/lib/utils/safeJson';
 import { upsertTrendSnapshot } from '@/lib/trends';
 import { computeCombinedScore, computeHeuristicScore, hasBenchmarkDelta } from '@/lib/scoring/multiSignal';
 import { ensureAnalysisScoreSchema } from '@/lib/scoring/schema';
+import { runLayer0Triage } from '@/lib/analysis/triage';
+import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
+import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
 
 interface AnalysisJob {
   id: string;
@@ -15,6 +18,7 @@ interface CrawlResult {
   title: string;
   content: string;
   metadata?: {
+    source?: string;
     evidence?: {
       snippets?: string[];
       claims?: Array<{
@@ -100,21 +104,125 @@ async function analyzeArticle(crawlResult: CrawlResult, logs: string[] = []): Pr
       return null;
     }
 
+    const triage = runLayer0Triage({
+      title: crawlResult.title,
+      content: crawlResult.content,
+      source: crawlResult.metadata?.source || null
+    });
+
+    if (triage.skip) {
+      const filteredScore = 0.05;
+      const filteredConfidence = 0.9;
+      const filteredExplanation = `Layer-0 noise filter: ${triage.reason || 'No capability signals detected'}`;
+      const filteredBreakdown = {
+        modelScore: 0,
+        heuristicScore: 0,
+        secrecyBoost: 0,
+        corroborationPenalty: 0,
+        combinedScore: filteredScore,
+        weights: {
+          model: parseFloat(process.env.MODEL_SCORE_WEIGHT || '0.85'),
+          heuristic: parseFloat(process.env.HEURISTIC_SCORE_WEIGHT || '0.15')
+        },
+        signals: [],
+        filtered: true,
+        filterReason: triage.reason || 'noise'
+      };
+
+      await ensureAnalysisScoreSchema();
+      const filteredAnalysis = await withTimeout(
+        insert<AnalysisRecord>(
+          `INSERT INTO "AnalysisResult"
+           (id, "crawlId", score, confidence, indicators, severity, "evidenceQuality", "requiresVerification", "crossReferences", explanation, embedding, "modelScore", "heuristicScore", "scoreBreakdown")
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, $13::jsonb)
+           RETURNING id, score, confidence, indicators, severity`,
+          [
+            crawlResult.id,
+            filteredScore,
+            filteredConfidence,
+            [],
+            'low',
+            'filtered',
+            false,
+            [],
+            filteredExplanation,
+            null,
+            0,
+            0,
+            JSON.stringify(filteredBreakdown)
+          ]
+        ),
+        10000,
+        'DB insert filtered analysis',
+        logs
+      );
+
+      if (filteredAnalysis) {
+        await withTimeout(
+          Promise.all([
+            insert(
+              `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+              [filteredAnalysis.id, 'score', filteredScore]
+            ),
+            insert(
+              `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+              [filteredAnalysis.id, 'model_score', 0]
+            ),
+            insert(
+              `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+              [filteredAnalysis.id, 'heuristic_score', 0]
+            ),
+            insert(
+              `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+              [filteredAnalysis.id, 'confidence', filteredConfidence]
+            ),
+            insert(
+              `INSERT INTO "HistoricalData" (id, "analysisId", metric, value) VALUES (gen_random_uuid(), $1, $2, $3)`,
+              [filteredAnalysis.id, 'indicator_count', 0]
+            )
+          ]),
+          10000,
+          'DB insert filtered historical',
+          logs
+        );
+      }
+
+      const skipMsg = `[Analyze] Skipped by Layer-0 filter: ${triage.reason || 'noise'}`;
+      logs.push(skipMsg);
+      console.log(skipMsg);
+      return filteredAnalysis || null;
+    }
+
     const analyzeMsg = `[Analyze] Analyzing: ${crawlResult.title}`;
     console.log(analyzeMsg);
     logs.push(analyzeMsg);
 
     const evidenceSnippets = crawlResult.metadata?.evidence?.snippets || [];
+    const translationEnabled = process.env.CHINESE_TRANSLATION_ENABLED !== 'false';
+    let translatedSnippets: string[] = [];
+    let translatedTitle = '';
+    if (translationEnabled && shouldTranslateCjk(`${crawlResult.title} ${crawlResult.content}`)) {
+      try {
+        const translation = await translateToEnglish({
+          title: crawlResult.title,
+          snippets: evidenceSnippets.slice(0, 6)
+        });
+        translatedTitle = translation.translatedTitle || '';
+        translatedSnippets = translation.translatedSnippets || [];
+      } catch (err) {
+        console.warn('[Translate] Failed to translate evidence snippets:', err);
+      }
+    }
 
     // Call OpenAI
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
     const options = {
       model,
       messages: [
         { role: 'system' as const, content: AGI_DETECTION_PROMPT },
         {
           role: 'user' as const,
-          content: `Title: ${crawlResult.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n\nContent: ${crawlResult.content}`
+          content: `Title: ${crawlResult.title}\n${translatedTitle ? `Translated Title: ${translatedTitle}\n` : ''}\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n${translatedSnippets.length > 0 ? `\nTranslated Evidence:\n${translatedSnippets.map(s => `- ${s}`).join('\n')}\n` : ''}\nContent: ${crawlResult.content}`
         }
       ],
       response_format: { type: 'json_object' as const }
@@ -134,18 +242,48 @@ async function analyzeArticle(crawlResult: CrawlResult, logs: string[] = []): Pr
 
     const analysisResult = parseOpenAIResponse(content);
     const modelScore = analysisResult.score || 0;
+    const crossReferences = analysisResult.cross_references || [];
+    const claims = crawlResult.metadata?.evidence?.claims || [];
+    let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
+    if (translatedSnippets.length > 0) {
+      const snippetObjects: EvidenceSnippet[] = translatedSnippets.map(text => ({ text, score: 1, tags: [] }));
+      translatedClaims = extractEvidenceClaims(snippetObjects);
+    }
+    const mergedClaims = [...claims, ...translatedClaims];
     const heuristic = computeHeuristicScore({
-      claims: crawlResult.metadata?.evidence?.claims || [],
+      claims: mergedClaims,
       snippetsCount: crawlResult.metadata?.evidence?.snippets?.length || 0
     });
+    let corroborationPenalty = 0;
+    if (crossReferences.length > 0) {
+      try {
+        const normalizedRefs = crossReferences.map(r => r.toLowerCase());
+        const refMatches = await query<{ count: number }>(
+          `SELECT COUNT(*)::int as count
+           FROM "CrawlResult"
+           WHERE LOWER(metadata->>'source') = ANY($1)`,
+          [normalizedRefs]
+        );
+        if (!refMatches[0]?.count) {
+          corroborationPenalty = 0.15;
+        }
+      } catch (err) {
+        console.warn('[Analyze All] Corroboration check failed:', err);
+      }
+    }
+
+    const signals = [...heuristic.signals];
+    if (corroborationPenalty > 0) {
+      signals.push({ name: 'corroboration_penalty', value: -corroborationPenalty, detail: 'no corroboration' });
+    }
     const combined = computeCombinedScore({
       modelScore,
       heuristicScore: heuristic.score,
       secrecyBoost: 0,
-      signals: heuristic.signals
+      corroborationPenalty,
+      signals
     });
-    const claims = crawlResult.metadata?.evidence?.claims || [];
-    const hasDelta = hasBenchmarkDelta(claims);
+    const hasDelta = hasBenchmarkDelta(mergedClaims);
     let severity = computeSeverity(combined.combinedScore, analysisResult.severity);
     severity = enforceCriticalEvidenceGate(severity, hasDelta);
 

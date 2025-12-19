@@ -29,6 +29,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+server.log
+crawler-diagnostic-report.json
+neon-backup.sql
+fly.toml
+database/fly.toml
+debug-*.png
+track.md
 
 # env files (can opt-in for committing if needed)
 .env*

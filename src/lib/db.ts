@@ -147,11 +147,11 @@ export async function findAnomalies(
         cr.title,
         cr.url,
         CASE
-          WHEN COALESCE(cr.metadata->>'source', '') IN ('OpenAI Blog', 'DeepMind Research', 'Anthropic Blog', 'Microsoft AI Blog')
+          WHEN COALESCE(cr.metadata->>'source', '') IN ('OpenAI Blog', 'DeepMind Research', 'Anthropic Blog', 'Microsoft AI Blog', 'BAAI Research', 'ByteDance Seed Research', 'Tencent AI Lab', 'Shanghai AI Lab', 'Qwen GitHub Releases', 'Huawei Noah Research', 'ModelScope Releases')
             THEN 'research'
           WHEN COALESCE(cr.metadata->>'source', '') IN ('TechCrunch AI', 'VentureBeat AI')
             THEN 'news'
-          WHEN COALESCE(cr.metadata->>'source', '') IN ('arXiv AI', 'Anthropic Research')
+          WHEN COALESCE(cr.metadata->>'source', '') IN ('arXiv AI', 'Anthropic Research', 'ChinaXiv')
             THEN 'academic'
           ELSE 'other'
         END AS source_group
