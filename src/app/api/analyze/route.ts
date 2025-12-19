@@ -54,6 +54,19 @@ interface AnalysisResult {
   timestamp: Date;
 }
 
+const OPENAI_MAX_RETRIES = Math.max(0, parseInt(process.env.OPENAI_MAX_RETRIES || '3', 10));
+const OPENAI_RETRY_BASE_MS = Math.max(250, parseInt(process.env.OPENAI_RETRY_BASE_MS || '1500', 10));
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const isRateLimitError = (err: unknown) => {
+  const error = err as { status?: number; code?: string; message?: string };
+  if (error?.status === 429) return true;
+  if (error?.code && /rate_limit/i.test(error.code)) return true;
+  if (error?.message && /rate limit|429/i.test(error.message)) return true;
+  return false;
+};
+
 async function updateTrendAnalysis() {
   const now = new Date();
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -243,9 +256,21 @@ export async function POST(request: NextRequest) {
       ],
       response_format: { type: "json_object" as const }
     };
-    const completion = await openai.chat.completions.create(options);
+    let completion;
+    for (let attempt = 0; attempt <= OPENAI_MAX_RETRIES; attempt += 1) {
+      try {
+        completion = await openai.chat.completions.create(options);
+        break;
+      } catch (err) {
+        if (!isRateLimitError(err) || attempt === OPENAI_MAX_RETRIES) {
+          throw err;
+        }
+        const backoff = OPENAI_RETRY_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 250);
+        await sleep(backoff);
+      }
+    }
 
-    const content = completion.choices[0]?.message?.content;
+    const content = completion?.choices[0]?.message?.content;
     if (!content) {
       throw new Error('No analysis result received from OpenAI');
     }

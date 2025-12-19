@@ -50,6 +50,18 @@ const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '15000', 10)
 const ANALYZE_BATCH_SIZE = Math.max(1, parseInt(process.env.ANALYZE_BATCH_SIZE || '2', 10));
 const ANALYZE_JOB_LIMIT = Math.max(1, parseInt(process.env.ANALYZE_JOB_LIMIT || '50', 10));
 const BATCH_TIMEOUT_MS = parseInt(process.env.BATCH_TIMEOUT_MS || '20000', 10);
+const OPENAI_MAX_RETRIES = Math.max(0, parseInt(process.env.OPENAI_MAX_RETRIES || '3', 10));
+const OPENAI_RETRY_BASE_MS = Math.max(250, parseInt(process.env.OPENAI_RETRY_BASE_MS || '1500', 10));
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const isRateLimitError = (err: unknown) => {
+  const error = err as { status?: number; code?: string; message?: string };
+  if (error?.status === 429) return true;
+  if (error?.code && /rate_limit/i.test(error.code)) return true;
+  if (error?.message && /rate limit|429/i.test(error.message)) return true;
+  return false;
+};
 
 // Small utility to bound async operations
 function withTimeout<T>(
@@ -231,12 +243,27 @@ async function analyzeArticle(crawlResult: CrawlResult, logs: string[] = []): Pr
 
     logs.push(`[Analyze] Calling OpenAI model=${model} timeout=${OPENAI_TIMEOUT_MS}ms`);
 
-    const completion = await openai.chat.completions.create(options, {
-      timeout: OPENAI_TIMEOUT_MS,
-      maxRetries: 0
-    });
+    let completion;
+    for (let attempt = 0; attempt <= OPENAI_MAX_RETRIES; attempt += 1) {
+      try {
+        completion = await openai.chat.completions.create(options, {
+          timeout: OPENAI_TIMEOUT_MS,
+          maxRetries: 0
+        });
+        break;
+      } catch (err) {
+        if (!isRateLimitError(err) || attempt === OPENAI_MAX_RETRIES) {
+          throw err;
+        }
+        const backoff = OPENAI_RETRY_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 250);
+        const msg = `[Analyze] Rate limited (429). Retry ${attempt + 1}/${OPENAI_MAX_RETRIES} in ${backoff}ms`;
+        console.warn(msg);
+        logs.push(msg);
+        await sleep(backoff);
+      }
+    }
 
-    const content = completion.choices[0]?.message?.content;
+    const content = completion?.choices[0]?.message?.content;
     if (!content) {
       throw new Error('No analysis result received from OpenAI');
     }

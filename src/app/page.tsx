@@ -120,6 +120,19 @@ type CacheShape = {
   trends?: Record<string, any[]>;
 };
 
+type DbInfoResponse = {
+  success: boolean;
+  env?: {
+    DATABASE_URL_set?: boolean;
+    DIRECT_URL_set?: boolean;
+    NEON_ONLY?: boolean;
+  };
+  info?: {
+    host?: string | null;
+    envHost?: string | null;
+  };
+};
+
 const readCache = (): CacheShape | null => {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
@@ -217,6 +230,7 @@ export default function Home(): React.ReactElement {
     recommendation: string;
     timestamp: string;
   }>>({});
+  const [dbInfo, setDbInfo] = useState<DbInfoResponse | null>(null);
   const { logs, addLog, clearLogs } = useConsoleCapture();
 
   const scrollToAnalysis = (analysisId: string | null) => {
@@ -423,6 +437,19 @@ export default function Home(): React.ReactElement {
   // Load existing data on mount
   useEffect(() => {
     loadExistingData();
+  }, []);
+
+  useEffect(() => {
+    const fetchDbInfo = async () => {
+      try {
+        const response = await apiFetch('/api/db-info');
+        const data = await response.json();
+        setDbInfo(data);
+      } catch {
+        setDbInfo({ success: false });
+      }
+    };
+    fetchDbInfo();
   }, []);
 
   const loadExistingData = async () => {
@@ -728,6 +755,16 @@ export default function Home(): React.ReactElement {
   };
 
   const riskLevel = getAGIRiskLevel();
+  const isLocalHost = (host?: string | null) => {
+    if (!host) return false;
+    const lower = host.toLowerCase();
+    return lower === 'localhost' || lower.includes('127.0.0.1') || lower.includes('::1');
+  };
+  const envHost = dbInfo?.info?.envHost ?? null;
+  const reportedHost = dbInfo?.info?.host ?? null;
+  const neonOnly = dbInfo?.env?.NEON_ONLY ?? true;
+  const isDbLocal = isLocalHost(envHost || '') || (!envHost && isLocalHost(reportedHost || ''));
+  const blockLocalDb = neonOnly && isDbLocal;
   const criticalCount = analyses.filter(a => (a.severity || '').toLowerCase() === 'critical').length;
 
   return (
@@ -799,6 +836,25 @@ export default function Home(): React.ReactElement {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {blockLocalDb && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/95 backdrop-blur-sm">
+            <div className="max-w-xl w-full mx-4 bg-white border border-red-200 rounded-xl p-6 shadow-xl">
+              <h2 className="text-xl font-semibold text-red-700 mb-2">Local DB Blocked</h2>
+              <p className="text-sm text-[var(--muted)] mb-4">
+                This app is configured for Neon-only. A local database host was detected, so the UI is blocked to prevent
+                mixing data sources.
+              </p>
+              <div className="text-xs text-[var(--muted)] space-y-1 mb-4">
+                <div>Env host: <span className="font-mono">{envHost || 'unknown'}</span></div>
+                <div>Server host: <span className="font-mono">{reportedHost || 'unknown'}</span></div>
+              </div>
+              <div className="text-sm text-[var(--foreground)]">
+                Fix: update <span className="font-mono">DATABASE_URL</span> in <span className="font-mono">.env.local</span> to your Neon URL,
+                ensure <span className="font-mono">NEON_ONLY=true</span>, then restart the dev server.
+              </div>
+            </div>
+          </div>
+        )}
         {/* Initial Loading - removed as it's too quick to show */}
         {/* Error Alert */}
         {error && (
