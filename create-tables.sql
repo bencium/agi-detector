@@ -1,5 +1,8 @@
 -- Create tables for AGI Detector
 
+-- Enable pgvector extension (required for embeddings)
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Create CrawlResult table
 CREATE TABLE IF NOT EXISTS "CrawlResult" (
     "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS "AnalysisResult" (
     "scoreBreakdown" JSONB,
     "indicators" TEXT[] NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
+    "embedding" vector(512),
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "AnalysisResult_pkey" PRIMARY KEY ("id")

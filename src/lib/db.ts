@@ -152,6 +152,22 @@ export async function findAnomalies(
 }>> {
   if (!isDbEnabled) return [];
 
+  try {
+    const col = await queryOne<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM information_schema.columns
+         WHERE table_name = 'AnalysisResult'
+           AND column_name = 'embedding'
+       ) as exists`
+    );
+    if (!col?.exists) {
+      return [];
+    }
+  } catch (err) {
+    console.warn('[Anomalies] Failed to verify embedding column:', err);
+  }
+
   // Get articles with highest average distance to their source group centroid
   const sql = `
     WITH labeled AS (
