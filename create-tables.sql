@@ -75,6 +75,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS "CorrelationFinding_window_indicator_benchmark
 CREATE INDEX IF NOT EXISTS "CorrelationFinding_updatedAt_idx"
   ON "CorrelationFinding"("updatedAt");
 
+-- LLM insights (natural interpretations across sources)
+CREATE TABLE IF NOT EXISTS "InsightFinding" (
+    id TEXT NOT NULL DEFAULT gen_random_uuid(),
+    "windowDays" INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    confidence DOUBLE PRECISION NOT NULL,
+    sources TEXT[] NOT NULL DEFAULT '{}',
+    urls TEXT[] NOT NULL DEFAULT '{}',
+    "evidenceSnippets" TEXT[] NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "InsightFinding_pkey" PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "InsightFinding_window_title_key"
+  ON "InsightFinding"("windowDays", title);
+CREATE INDEX IF NOT EXISTS "InsightFinding_updatedAt_idx"
+  ON "InsightFinding"("updatedAt");
+
 -- Evidence claims table
 CREATE TABLE IF NOT EXISTS "EvidenceClaim" (
     id TEXT NOT NULL DEFAULT gen_random_uuid(),

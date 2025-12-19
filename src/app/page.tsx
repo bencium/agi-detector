@@ -185,6 +185,8 @@ export default function Home(): React.ReactElement {
   const [trendMeta, setTrendMeta] = useState<any | null>(null);
   const [correlations, setCorrelations] = useState<any[]>([]);
   const [correlationsWindowDays] = useState<number>(30);
+  const [insights, setInsights] = useState<any[]>([]);
+  const [insightsWindowDays] = useState<number>(30);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [sourceStats, setSourceStats] = useState<Record<string, number>>({});
@@ -300,6 +302,7 @@ export default function Home(): React.ReactElement {
               await loadExistingData();
               await fetchTrends();
               await fetchCorrelations();
+              await fetchInsights();
               addLog(job.status === 'completed' ? '✅ Analysis complete!' : '❌ Analysis failed.');
               setIsLoading(false);
               setJobProgress(null);
@@ -484,6 +487,8 @@ export default function Home(): React.ReactElement {
         fetchARCProgress();
         // Fetch correlation findings in background
         fetchCorrelations();
+        // Fetch LLM insights in background
+        fetchInsights();
 
         // Automatically analyze unanalyzed articles
         const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
@@ -548,6 +553,18 @@ export default function Home(): React.ReactElement {
       }
     } catch (error) {
       console.warn('Failed to fetch correlations:', error);
+    }
+  };
+
+  const fetchInsights = async () => {
+    try {
+      const response = await apiFetch(`/api/insights?days=${insightsWindowDays}&limit=5`);
+      const data = await response.json();
+      if (data.success) {
+        setInsights(data.data.insights || []);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch insights:', error);
     }
   };
 
@@ -987,6 +1004,62 @@ export default function Home(): React.ReactElement {
                             </span>
                           ))}
                           {item.urls.length > 2 && <span>…</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* LLM Insights */}
+            <div className="bg-[var(--surface)] rounded-xl p-6 border border-[var(--border)]">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-[var(--foreground)]">LLM Insights</h3>
+                  <p className="text-xs text-[var(--muted)] mt-1">
+                    Natural-language synthesis across sources (last {insightsWindowDays} days)
+                  </p>
+                </div>
+                <button
+                  onClick={fetchInsights}
+                  className="text-xs px-3 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-hover)]"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {insights.length === 0 ? (
+                <div className="text-sm text-[var(--muted)] text-center py-6">
+                  No insights yet. Run a crawl + analysis, then refresh.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {insights.map((item, idx) => (
+                    <div key={item.id || idx} className="p-4 rounded-lg bg-[var(--surface-hover)] border border-[var(--border)]">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[var(--foreground)]">{item.title}</span>
+                        <span className="text-xs text-[var(--muted)]">
+                          {(typeof item.confidence === 'number' ? item.confidence : 0.5) * 100}% confidence
+                        </span>
+                      </div>
+                      <p className="text-sm text-[var(--muted)] mt-2">{item.summary}</p>
+                      {Array.isArray(item.sources) && item.sources.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {item.sources.slice(0, 6).map((source: string) => (
+                            <span key={source} className="text-xs px-2 py-0.5 rounded-full bg-white/70 text-[var(--muted)] border border-[var(--border)]">
+                              {source}
+                            </span>
+                          ))}
+                          {item.sources.length > 6 && (
+                            <span className="text-xs text-[var(--muted)]">+{item.sources.length - 6} more</span>
+                          )}
+                        </div>
+                      )}
+                      {Array.isArray(item.urls) && item.urls.length > 0 && (
+                        <div className="mt-2 text-xs text-[var(--muted)]">
+                          Sources: {item.urls.slice(0, 2).join(' · ')}
+                          {item.urls.length > 2 && ' …'}
                         </div>
                       )}
                     </div>

@@ -15,6 +15,7 @@ An advanced monitoring system designed to detect early signs of Artificial Gener
 - **CJK normalization**: Chinese text gets tokenization support and optional translation for consistent indicators.
 - **Playwright retries**: Gated sources use Playwright with retries for better coverage.
 - **Correlation MVP**: Cross-source co-occurrence of indicators + benchmark deltas surfaced on Overview.
+- **LLM Insights**: Natural-language synthesis across sources with grounded URLs.
 
 ## 🧭 Roadmap (Next)
 - Improve selectors and stability for China lab pages (BAAI, ByteDance Seed, Tencent AI Lab, Shanghai AI Lab).
@@ -167,6 +168,9 @@ NEXT_PUBLIC_LOCAL_API_KEY=local-...
 # Optional: Override default analysis model
 # Default: OPENAI_MODEL=gpt-5-mini
 # OPENAI_MODEL=gpt-5-mini
+
+# Optional: LLM insights model
+# INSIGHTS_MODEL=gpt-5-mini
 
 # Optional: Analyze-all job limits
 # ANALYZE_JOB_LIMIT=50
