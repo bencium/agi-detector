@@ -14,8 +14,10 @@ export async function POST(request: NextRequest) {
     }, { status: 503 });
   }
 
-  const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'analyze-all' });
-  if (limited) return limited;
+  if (process.env.NODE_ENV === 'production') {
+    const limited = enforceRateLimit(request, { windowMs: 60_000, max: 2, keyPrefix: 'analyze-all' });
+    if (limited) return limited;
+  }
 
   try {
     const remaining = await query<{ count: string }>(
