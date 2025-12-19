@@ -113,6 +113,16 @@ export async function GET() {
 
     const latestCrawl = crawlResults.length > 0 ? crawlResults[0] : null;
     const lastCrawlRunAt = await getLastCrawlRunAt();
+    const totals = await query<{
+      crawl_count: number;
+      analysis_count: number;
+    }>(`
+      SELECT
+        (SELECT COUNT(*)::int FROM "CrawlResult") as crawl_count,
+        (SELECT COUNT(*)::int FROM "AnalysisResult") as analysis_count
+    `);
+    const totalArticles = totals[0]?.crawl_count ?? crawlResults.length;
+    const totalAnalyses = totals[0]?.analysis_count ?? analyses.length;
 
     return NextResponse.json({
       success: true,
@@ -123,8 +133,8 @@ export async function GET() {
         sourceStats,
         latestCrawlTime: latestCrawl?.timestamp || null,
         lastCrawlRunAt,
-        totalArticles: crawlResults.length,
-        totalAnalyses: analyses.length
+        totalArticles,
+        totalAnalyses
       }
     });
   } catch (error) {

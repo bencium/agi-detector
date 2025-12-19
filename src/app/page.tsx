@@ -115,6 +115,8 @@ type CacheShape = {
   analyses: AnalysisResult[];
   sourceStats: Record<string, number>;
   lastCrawlTime: string | null;
+  totalArticles?: number;
+  totalAnalyses?: number;
   trends?: Record<string, any[]>;
 };
 
@@ -179,6 +181,8 @@ export default function Home(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
+  const [totalArticles, setTotalArticles] = useState(0);
+  const [totalAnalyses, setTotalAnalyses] = useState(0);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [trendStats, setTrendStats] = useState<any | null>(null);
@@ -430,6 +434,8 @@ export default function Home(): React.ReactElement {
         setAnalyses(cached.analyses || []);
         setSourceStats(cached.sourceStats || {});
         setLastCrawlTime(cachedLastCrawlTime || null);
+        setTotalArticles(cached.totalArticles || cached.crawlResults?.length || 0);
+        setTotalAnalyses(cached.totalAnalyses || cached.analyses?.length || 0);
         setMonitoringSourceStatus(buildMonitoringStatus(cached.sourceStats || {}));
         setIsInitialLoading(false);
       }
@@ -442,6 +448,8 @@ export default function Home(): React.ReactElement {
         setCrawlResults(data.data.crawlResults);
         setAnalyses(data.data.analyses);
         setSourceStats(data.data.sourceStats);
+        setTotalArticles(data.data.totalArticles || data.data.crawlResults.length);
+        setTotalAnalyses(data.data.totalAnalyses || data.data.analyses.length);
         const latestFromResults = (data.data.crawlResults || []).reduce((latest: string | null, item: any) => {
           if (!item?.timestamp) return latest;
           const ts = new Date(item.timestamp).toISOString();
@@ -465,7 +473,9 @@ export default function Home(): React.ReactElement {
           crawlResults: data.data.crawlResults,
           analyses: data.data.analyses,
           sourceStats: data.data.sourceStats,
-          lastCrawlTime: latestTime || data.data.latestCrawlTime
+          lastCrawlTime: latestTime || data.data.latestCrawlTime,
+          totalArticles: data.data.totalArticles || data.data.crawlResults.length,
+          totalAnalyses: data.data.totalAnalyses || data.data.analyses.length
         });
         setDataLoadError(null);
         addLog(`Loaded ${data.data.totalArticles} articles and ${data.data.totalAnalyses} analyses`);
@@ -838,15 +848,17 @@ export default function Home(): React.ReactElement {
                         Active Sources
                       </div>
                       <div className="flex items-baseline space-x-2">
-                        <div className="text-3xl font-bold text-[var(--foreground)]">7</div>
+                        <div className="text-3xl font-bold text-[var(--foreground)]">
+                          {monitoringSourceStatus.filter(s => s.status === 'active').length}
+                        </div>
                         <div className="text-sm text-[var(--muted)]">monitoring</div>
                       </div>
                     </div>
                     <div className="bg-[var(--surface-hover)] border-l-4 border-[var(--accent)] rounded-lg p-5 transition-all hover:scale-[1.02] hover:shadow-md">
                       <div className="text-sm text-[var(--muted)] font-medium mb-2">Total Articles</div>
                       <div className="flex items-baseline space-x-2">
-                        <div className="text-3xl font-bold text-[var(--foreground)]">{crawlResults.length}</div>
-                        {crawlResults.length > 0 && (
+                        <div className="text-3xl font-bold text-[var(--foreground)]">{totalArticles}</div>
+                        {totalArticles > 0 && (
                           <div className="text-sm text-green-600 flex items-center">
                             <span>↑</span>
                           </div>
@@ -856,9 +868,9 @@ export default function Home(): React.ReactElement {
                     <div className="bg-[var(--surface-hover)] border-l-4 border-gray-400 rounded-lg p-5 transition-all hover:scale-[1.02] hover:shadow-md">
                       <div className="text-sm text-[var(--muted)] font-medium mb-2">Analyzed</div>
                       <div className="flex items-baseline space-x-2">
-                        <div className="text-3xl font-bold text-[var(--foreground)]">{analyses.length}</div>
+                        <div className="text-3xl font-bold text-[var(--foreground)]">{totalAnalyses}</div>
                         <div className="text-sm text-[var(--muted)]">
-                          of {crawlResults.length}
+                          of {totalArticles}
                         </div>
                       </div>
                     </div>

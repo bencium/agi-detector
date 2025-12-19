@@ -16,19 +16,33 @@ export async function GET(request: NextRequest) {
     const ttlMinutes = Math.min(Math.max(Number(process.env.INSIGHTS_TTL_MINUTES || 360), 15), 1440);
 
     const cached = await getInsights(windowDays, limit);
+    const hasApiKey = !!(process.env.OPENAI_API_KEY || process.env.API_KEY);
     const now = Date.now();
     const latest = cached[0]?.updatedAt ? new Date(cached[0].updatedAt).getTime() : 0;
     const ttlFresh = latest > 0 && (now - latest) < ttlMinutes * 60 * 1000;
 
-    const insights = (cached.length > 0 && ttlFresh && !forceRefresh)
-      ? cached
-      : await refreshInsights(windowDays, limit);
+    let insights = cached;
+    let errorMessage: string | null = null;
+    if (cached.length === 0 || !ttlFresh || forceRefresh) {
+      if (!hasApiKey) {
+        errorMessage = 'OpenAI API key not configured';
+      } else {
+        try {
+          insights = await refreshInsights(windowDays, limit);
+        } catch (error) {
+          errorMessage = error instanceof Error ? error.message : 'Failed to refresh insights';
+          // fall back to cached data if available
+          insights = cached;
+        }
+      }
+    }
 
     return NextResponse.json({
       success: true,
       data: {
         insights,
         cached: cached.length > 0 && ttlFresh && !forceRefresh,
+        error: errorMessage,
         ttlMinutes,
         windowDays
       }

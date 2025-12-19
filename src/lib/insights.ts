@@ -129,16 +129,22 @@ ${s.snippets.map((snip) => `- ${snip}`).join('\n')}
 `).join('\n')}
 `.trim();
 
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
-      { role: 'system', content: 'You extract correlations across sources and return JSON only.' },
-      { role: 'user', content: prompt }
-    ],
-    temperature: 0.3
-  });
+  let raw = '[]';
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: 'You extract correlations across sources and return JSON only.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3
+    });
+    raw = response.choices[0]?.message?.content || '[]';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown OpenAI error';
+    throw new Error(`OpenAI insights failed: ${message}`);
+  }
 
-  const raw = response.choices[0]?.message?.content || '[]';
   let parsed: Array<{
     title: string;
     summary: string;
@@ -149,7 +155,7 @@ ${s.snippets.map((snip) => `- ${snip}`).join('\n')}
   }> = [];
   try {
     parsed = JSON.parse(raw);
-  } catch (err) {
+  } catch {
     console.warn('[Insights] Failed to parse LLM JSON, returning empty list.');
     parsed = [];
   }
