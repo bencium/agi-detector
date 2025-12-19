@@ -196,6 +196,7 @@ export default function Home(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<'overview' | 'findings' | 'analysis' | 'trends' | 'anomalies'>('overview');
   const [totalArticles, setTotalArticles] = useState(0);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
+  const autoAnalyzeTriggeredRef = useRef(false);
   const analyzeCooldownRef = useRef(0);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -548,9 +549,15 @@ export default function Home(): React.ReactElement {
         // Fetch LLM insights in background
         fetchInsights();
 
-        // Automatically analyze unanalyzed articles
+        // Automatically analyze unanalyzed articles (only once per page load)
         const unanalyzedCount = data.data.totalArticles - data.data.totalAnalyses;
-        if (unanalyzedCount > 0 && !isLoading && !jobProgress?.status) {
+        if (
+          unanalyzedCount > 0 &&
+          !autoAnalyzeTriggeredRef.current &&
+          !isLoading &&
+          !jobProgress?.status
+        ) {
+          autoAnalyzeTriggeredRef.current = true;
           addLog(`Found ${unanalyzedCount} unanalyzed articles. Starting analysis...`);
           setTimeout(() => analyzeData(), 2000); // Small delay to let UI settle
         }
