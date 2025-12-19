@@ -48,7 +48,8 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
-    console.error('Insights API error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to fetch insights' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to fetch insights';
+    console.error('Insights API error:', message);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

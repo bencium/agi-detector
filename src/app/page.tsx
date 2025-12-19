@@ -623,17 +623,22 @@ export default function Home(): React.ReactElement {
     try {
       const response = await apiFetch(`/api/insights?days=${days}&limit=5${force ? '&refresh=true' : ''}`);
       const data = await response.json();
-      if (data.success) {
-        const nextInsights = data.data.insights || [];
-        setInsights(nextInsights);
-        setInsightsError(data.data.error || null);
-        if (allowExpand && nextInsights.length === 0 && days < 180) {
-          setInsightsWindowDays(180);
-          return fetchInsights(force, 180, false);
-        }
+      if (!response.ok || !data.success) {
+        setInsights([]);
+        setInsightsError(data.error || 'Failed to fetch insights');
+        return;
+      }
+      const nextInsights = data.data.insights || [];
+      setInsights(nextInsights);
+      setInsightsError(data.data.error || null);
+      if (allowExpand && nextInsights.length === 0 && days < 180) {
+        setInsightsWindowDays(180);
+        return fetchInsights(force, 180, false);
       }
     } catch (error) {
       console.warn('Failed to fetch insights:', error);
+      setInsights([]);
+      setInsightsError('Failed to fetch insights');
     }
   };
 
