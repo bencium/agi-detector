@@ -91,8 +91,8 @@ export async function snapshotFromAnalysis(period: TrendPeriod): Promise<void> {
       COUNT(*) AS total,
       SUM(CASE WHEN ar."severity" = 'critical' THEN 1 ELSE 0 END) AS critical
     FROM "AnalysisResult" ar
-    WHERE ar."timestamp" >= NOW() - INTERVAL '${windowDays} days'
-  `);
+    WHERE ar."timestamp" >= NOW() - make_interval(days => $1)
+  `, [windowDays]);
 
   const row = rows[0];
   await upsertTrendSnapshot(period, {

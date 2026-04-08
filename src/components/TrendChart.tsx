@@ -1,17 +1,11 @@
 'use client';
 
 import React from 'react';
-
-interface TrendData {
-  timestamp: string;
-  avgScore: number;
-  maxScore: number;
-  criticalAlerts: number;
-}
+import type { TrendDataPoint, TrendPeriod } from '@/types';
 
 interface TrendChartProps {
-  data: TrendData[];
-  period: 'daily' | 'weekly' | 'monthly';
+  data: TrendDataPoint[];
+  period: TrendPeriod;
 }
 
 export default function TrendChart({ data, period }: TrendChartProps) {
@@ -24,7 +18,7 @@ export default function TrendChart({ data, period }: TrendChartProps) {
   }
 
   const sortedData = [...data].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
   );
 
   // Calculate chart dimensions

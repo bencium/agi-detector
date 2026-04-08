@@ -17,6 +17,19 @@ export type EvidenceBundle = {
   }>;
 };
 
+export type CrawlMetadata = {
+  source: string;
+  timestamp: string;
+  id: string;
+  fetchedAt?: string;
+  canonicalUrl?: string;
+  contentHash?: string;
+  title?: string;
+  author?: string;
+  language?: string;
+  evidence?: EvidenceBundle;
+};
+
 export function buildEvidence(content: string): EvidenceBundle {
   const snippets = extractEvidenceSnippets(content);
   const claims = extractEvidenceClaims(snippets);
@@ -34,7 +47,7 @@ export function buildCrawlMetadata(input: {
   publishedAt?: string;
   author?: string;
   id?: string;
-}): Record<string, unknown> {
+}): CrawlMetadata {
   const now = new Date().toISOString();
   const normalizedTimestamp = normalizeDate(input.publishedAt) || now;
   const normalizedSource = normalizeSourceName(input.source);

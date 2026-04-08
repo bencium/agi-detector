@@ -73,10 +73,10 @@ export async function GET(request: Request) {
           ar."score",
           ar."severity"
         FROM "AnalysisResult" ar
-        WHERE ar."timestamp" >= NOW() - INTERVAL '${windowDays} days'
+        WHERE ar."timestamp" >= NOW() - make_interval(days => $1)
         ORDER BY ar."timestamp" DESC
-        LIMIT $1
-      `, [limit]);
+        LIMIT $2
+      `, [windowDays, limit]);
 
       trends = rows.map(r => ({
         timestamp: r.timestamp,

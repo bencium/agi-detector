@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query, queryOne, isDbEnabled } from '@/lib/db';
+import { queryOne, isDbEnabled } from '@/lib/db';
 
 export async function GET() {
   if (!isDbEnabled) {

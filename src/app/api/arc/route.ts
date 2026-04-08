@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, insert, queryOne, isDbEnabled } from '@/lib/db';
+import { insert, queryOne, isDbEnabled } from '@/lib/db';
 import {
   fetchAllARCData,
   calculateAGIProgress,

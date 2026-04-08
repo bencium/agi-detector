@@ -4,15 +4,6 @@ const nextConfig: NextConfig = {
   // Docker/container deployment
   output: 'standalone',
 
-  // Security: Build-time checks
-  // Note: Some minor type issues remain but don't affect security
-  eslint: {
-    ignoreDuringBuilds: true,  // Warnings only, build succeeds
-  },
-  typescript: {
-    ignoreBuildErrors: true,  // Minor type issues in backfill routes
-  },
-
   // Security headers
   async headers() {
     return [

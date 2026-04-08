@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query, queryOne, execute, isDbEnabled } from '@/lib/db';
+import { queryOne, execute, isDbEnabled } from '@/lib/db';
 import { openai } from '@/lib/openai';
 import { crawlSource, SOURCES } from '@/lib/crawler';
 import { applyValidationOverride, enforceCriticalEvidenceGate, severityForScore } from '@/lib/severity';
@@ -152,8 +152,10 @@ export async function POST(request: Request) {
           content: `Title: ${analysis.title}\n\nEvidence Snippets:\n${evidenceSnippets.map(s => `- ${s}`).join('\n')}\n${translatedSnippets.length > 0 ? `\nTranslated Evidence:\n${translatedSnippets.map(s => `- ${s}`).join('\n')}\n` : ''}\nContent: ${analysis.content}`
         }
       ],
-      response_format: { type: "json_object" as const }
+      response_format: { type: "json_object" as const },
+      max_tokens: 500
     };
+    // COST: ~$0.05-0.20/day at 5-10 validations/day
     const validation = await openai.chat.completions.create(vOptions);
 
     const validationResult = safeJsonParse(validation.choices[0]?.message?.content || '{}', {

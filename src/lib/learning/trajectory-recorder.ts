@@ -92,14 +92,16 @@ export async function getTrajectoryStats(days: number = 30): Promise<TrajectoryS
     // Get total counts
     const totalResult = await query<{ count: string }>(
       `SELECT COUNT(*) as count FROM search_trajectory
-       WHERE created_at > NOW() - INTERVAL '${days} days'`
+       WHERE created_at > NOW() - make_interval(days => $1)`,
+      [days]
     );
     const totalRecords = Number(totalResult[0]?.count || 0);
 
     // Get useful counts
     const usefulResult = await query<{ count: string }>(
       `SELECT COUNT(*) as count FROM search_trajectory
-       WHERE was_useful = true AND created_at > NOW() - INTERVAL '${days} days'`
+       WHERE was_useful = true AND created_at > NOW() - make_interval(days => $1)`,
+      [days]
     );
     const usefulCount = Number(usefulResult[0]?.count || 0);
     const notUsefulCount = totalRecords - usefulCount;
@@ -108,10 +110,11 @@ export async function getTrajectoryStats(days: number = 30): Promise<TrajectoryS
     const sourceResult = await query<{ source: string; count: string }>(
       `SELECT context->>'source' as source, COUNT(*) as count
        FROM search_trajectory
-       WHERE was_useful = true AND created_at > NOW() - INTERVAL '${days} days' AND context->>'source' IS NOT NULL
+       WHERE was_useful = true AND created_at > NOW() - make_interval(days => $1) AND context->>'source' IS NOT NULL
        GROUP BY context->>'source'
        ORDER BY count DESC
-       LIMIT 5`
+       LIMIT 5`,
+      [days]
     );
     const topUsefulSources = sourceResult.map(r => ({
       source: r.source || 'unknown',
@@ -167,7 +170,8 @@ export async function cleanupOldTrajectories(retentionDays: number = 30): Promis
 
   try {
     const result = await execute(
-      `DELETE FROM search_trajectory WHERE created_at < NOW() - INTERVAL '${retentionDays} days'`
+      `DELETE FROM search_trajectory WHERE created_at < NOW() - make_interval(days => $1)`,
+      [retentionDays]
     );
 
     console.log(`[Trajectory] Cleaned up ${result} old records`);
@@ -265,8 +269,9 @@ export async function getARCProgressHistory(days: number = 30): Promise<{
     }>(
       `SELECT source, top_score, gap_to_human, timestamp
        FROM arc_progress
-       WHERE timestamp > NOW() - INTERVAL '${days} days'
-       ORDER BY timestamp DESC`
+       WHERE timestamp > NOW() - make_interval(days => $1)
+       ORDER BY timestamp DESC`,
+      [days]
     );
 
     return history.map(h => ({

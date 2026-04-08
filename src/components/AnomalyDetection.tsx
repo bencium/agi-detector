@@ -126,7 +126,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
               Semantic Anomaly Detection
             </h3>
             <p className="text-sm text-[var(--muted)]">
-              Articles that are semantically "unusual" - far from the cluster center of typical content.
+              Articles that are semantically &quot;unusual&quot; - far from the cluster center of typical content.
               Useful for AGI detection since breakthroughs might look different from standard research.
             </p>
           </div>

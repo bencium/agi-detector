@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { chromium, Browser, Page } from 'playwright';
+import { chromium, Browser } from 'playwright';
 import UserAgent from 'user-agents';
 import { parseStringPromise } from 'xml2js';
 import { RateLimiter as Limiter } from 'limiter';

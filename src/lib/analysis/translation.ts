@@ -19,8 +19,10 @@ export async function translateToEnglish(input: {
   const model = process.env.TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
   const prompt = `Translate the following title and evidence snippets to concise English. Preserve numbers, symbols, and benchmark names. Output JSON with keys: translatedTitle (string) and translatedSnippets (array of strings).`;
 
+  // COST: ~$0.02-0.10/day at 5-10 translations/day
   const response = await openai.chat.completions.create({
     model,
+    max_tokens: 300,
     messages: [
       { role: 'system', content: prompt },
       {

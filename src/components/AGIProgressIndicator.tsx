@@ -89,7 +89,7 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
       {/* Key Definition */}
       <div className="bg-[var(--surface-hover)] rounded-lg p-4 mb-6 border-l-4" style={{ borderColor: 'var(--accent-cyan)' }}>
         <p className="text-sm text-[var(--foreground)] font-medium italic">
-          "When no remaining tasks challenge AI while remaining accessible to humans, AGI is achieved."
+          &quot;When no remaining tasks challenge AI while remaining accessible to humans, AGI is achieved.&quot;
         </p>
         <p className="text-xs text-[var(--muted)] mt-2">
           - ARC Prize Definition

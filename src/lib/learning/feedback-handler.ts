@@ -412,8 +412,9 @@ export async function getRecentSecrecyPatterns(days: number = 7): Promise<{
     }>(
       `SELECT pattern_type, severity, source, description, detected_at
        FROM secrecy_pattern
-       WHERE detected_at > NOW() - INTERVAL '${days} days'
-       ORDER BY detected_at DESC`
+       WHERE detected_at > NOW() - make_interval(days => $1)
+       ORDER BY detected_at DESC`,
+      [days]
     );
 
     return patterns.map(p => ({

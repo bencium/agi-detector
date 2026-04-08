@@ -14,7 +14,6 @@ export async function GET(request: NextRequest) {
     const ttlMinutes = Math.min(Math.max(Number(process.env.INSIGHTS_TTL_MINUTES || 1440), 15), 1440);
 
     const cached = await getInsights(windowDays, limit);
-    const hasApiKey = !!(process.env.OPENAI_API_KEY || process.env.API_KEY);
     const now = Date.now();
     const latest = cached[0]?.updatedAt ? new Date(cached[0].updatedAt).getTime() : 0;
     const ttlFresh = latest > 0 && (now - latest) < ttlMinutes * 60 * 1000;

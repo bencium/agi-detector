@@ -103,21 +103,22 @@ export async function isUrlSafeWithDns(url: string): Promise<UrlValidationResult
   const basic = isUrlSafe(url);
   if (!basic.safe) return basic;
 
+  const allowlistedHosts = new Set([
+    'baai.ac.cn',
+    'www.baai.ac.cn',
+    'seed.bytedance.com',
+    'www.seed.bytedance.com',
+    'tencent.net.cn',
+    'www.tencent.net.cn',
+    'shlab.org.cn',
+    'www.shlab.org.cn',
+    'chinaxiv.org',
+    'www.chinaxiv.org'
+  ]);
+
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.toLowerCase();
-    const allowlistedHosts = new Set([
-      'baai.ac.cn',
-      'www.baai.ac.cn',
-      'seed.bytedance.com',
-      'www.seed.bytedance.com',
-      'tencent.net.cn',
-      'www.tencent.net.cn',
-      'shlab.org.cn',
-      'www.shlab.org.cn',
-      'chinaxiv.org',
-      'www.chinaxiv.org'
-    ]);
 
     // Only resolve if hostname is not already an IP literal
     if (isIpLiteral(hostname)) {

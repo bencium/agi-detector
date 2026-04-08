@@ -257,9 +257,11 @@ ${aggregateLines}`.trim();
 
   let parsed: InsightDraft[] = [];
   if (hasApiKey) {
+    // COST: ~$0.10-0.30/day at 1-2 refreshes/day
     const response = await openai.chat.completions.create({
       model,
       temperature,
+      max_tokens: 1000,
       messages: [
         { role: 'system', content: 'Return JSON only. No markdown.' },
         { role: 'user', content: prompt }

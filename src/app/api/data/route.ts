@@ -8,7 +8,6 @@ interface CrawlResult {
   id: string;
   url: string;
   title: string;
-  content: string;
   timestamp: Date;
   metadata: Record<string, unknown> | null;
 }
@@ -41,9 +40,9 @@ export async function GET() {
 
   try {
     await ensureAnalysisScoreSchema();
-    // Fetch crawl results
+    // Fetch crawl results (excluding content column to avoid large payloads)
     const crawlResults = await query<CrawlResult>(`
-      SELECT id, url, title, content, timestamp, metadata
+      SELECT id, url, title, timestamp, metadata
       FROM "CrawlResult"
       ORDER BY timestamp DESC
       LIMIT 1000
