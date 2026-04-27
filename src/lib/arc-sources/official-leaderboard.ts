@@ -20,9 +20,28 @@ export interface ARCLeaderboardResult {
   topScore: number;
   humanBaseline: number;
   gap: number; // Gap to human performance
+  sourceStatus: 'live' | 'manual_snapshot' | 'unavailable';
+  sourceUrl: string;
+  lastVerifiedAt?: string;
+  limitations?: string[];
+  lastKnownSnapshot?: {
+    topScore: number;
+    team: string;
+    verifiedAt: string;
+    sourceUrl: string;
+  };
 }
 
 let browser: Browser | null = null;
+
+const ARC_LEADERBOARD_URL = 'https://arcprize.org/leaderboard';
+const ARC_2025_RESULTS_URL = 'https://arcprize.org/blog/arc-prize-2025-results-analysis';
+const LAST_KNOWN_ARC_SNAPSHOT = {
+  topScore: 0.2403,
+  team: 'NVARC (2025 Kaggle private eval winner)',
+  verifiedAt: '2025-12-05',
+  sourceUrl: ARC_2025_RESULTS_URL
+};
 
 async function getBrowser(): Promise<Browser> {
   if (!browser) {
@@ -48,7 +67,7 @@ export async function crawlARCLeaderboard(): Promise<ARCLeaderboardResult> {
 
   try {
     console.log('[ARC Official] Navigating to leaderboard...');
-    await page.goto('https://arcprize.org/leaderboard', {
+    await page.goto(ARC_LEADERBOARD_URL, {
       waitUntil: 'networkidle',
       timeout: 30000
     });
@@ -97,37 +116,58 @@ export async function crawlARCLeaderboard(): Promise<ARCLeaderboardResult> {
     let topScore = entries.length > 0 ? Math.max(...entries.map(e => e.score)) : 0;
     const humanBaseline = 1.0;
 
-    // Fallback: If scraping fails, use known ARC Prize 2025 winner score
-    // Source: https://arcprize.org/blog/arc-prize-2025-results-analysis
-    // Top Kaggle score: 24% on ARC-AGI-2 private dataset
+    // If scraping fails to expose structured data, mark the result as a manual
+    // snapshot. This is still useful for analysts, but it must never look live.
     if (topScore === 0) {
-      console.log('[ARC Official] Scraping returned no data, using known 2025 winner score (24%)');
-      topScore = 0.24;
+      console.log('[ARC Official] Scraping returned no data, using manual 2025 snapshot');
+      topScore = LAST_KNOWN_ARC_SNAPSHOT.topScore;
       entries.push({
         rank: 1,
-        team: 'ARChitects (2025 Winner)',
-        score: 0.24
+        team: LAST_KNOWN_ARC_SNAPSHOT.team,
+        score: LAST_KNOWN_ARC_SNAPSHOT.topScore
       });
     }
 
     console.log(`[ARC Official] Found ${entries.length} entries, top score: ${(topScore * 100).toFixed(1)}%`);
+    const sourceStatus = entries.length > 0 && entries[0]?.team === LAST_KNOWN_ARC_SNAPSHOT.team
+      ? 'manual_snapshot'
+      : 'live';
 
     return {
       entries,
       timestamp: new Date().toISOString(),
       topScore,
       humanBaseline,
-      gap: humanBaseline - topScore
+      gap: humanBaseline - topScore,
+      sourceStatus,
+      sourceUrl: sourceStatus === 'live' ? ARC_LEADERBOARD_URL : ARC_2025_RESULTS_URL,
+      lastVerifiedAt: sourceStatus === 'live' ? new Date().toISOString() : LAST_KNOWN_ARC_SNAPSHOT.verifiedAt,
+      limitations: sourceStatus === 'live'
+        ? ['ARC-AGI is benchmark evidence only; it is not an AGI meter.']
+        : [
+            'Live leaderboard scraping did not return structured data.',
+            'Using a clearly labeled manual snapshot, not live evidence.',
+            'ARC-AGI is benchmark evidence only; it is not an AGI meter.'
+          ],
+      lastKnownSnapshot: sourceStatus === 'live' ? undefined : LAST_KNOWN_ARC_SNAPSHOT
     };
   } catch (error) {
     console.error('[ARC Official] Error crawling leaderboard:', error);
-    // Return known score even on error
+    // Return source failure plus a labeled last-known snapshot for context.
     return {
-      entries: [{ rank: 1, team: 'ARChitects (2025 Winner)', score: 0.24 }],
+      entries: [],
       timestamp: new Date().toISOString(),
-      topScore: 0.24,
+      topScore: 0,
       humanBaseline: 1.0,
-      gap: 0.76
+      gap: 1.0,
+      sourceStatus: 'unavailable',
+      sourceUrl: ARC_LEADERBOARD_URL,
+      limitations: [
+        'Live leaderboard fetch failed.',
+        'No fresh benchmark score should be inferred from this response.',
+        'A last-known snapshot is provided only as historical context.'
+      ],
+      lastKnownSnapshot: LAST_KNOWN_ARC_SNAPSHOT
     };
   } finally {
     await page.close();
@@ -148,7 +188,10 @@ export function leaderboardToCrawlResults(result: ARCLeaderboardResult): any[] {
       id: `arc-leaderboard-${entry.team.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`,
       type: 'benchmark',
       score: entry.score,
-      rank: entry.rank
+      rank: entry.rank,
+      sourceStatus: result.sourceStatus,
+      sourceUrl: result.sourceUrl,
+      limitations: result.limitations
     }
   }));
 }

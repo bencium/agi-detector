@@ -3,6 +3,7 @@ import { insert, queryOne, isDbEnabled } from '@/lib/db';
 import {
   fetchAllARCData,
   calculateAGIProgress,
+  classifyARCBenchmarkEvidence,
   cleanupARCSources
 } from '@/lib/arc-sources';
 import { enforceRateLimit } from '@/lib/security/rateLimit';
@@ -41,14 +42,18 @@ export async function GET(request: NextRequest) {
       if (recentProgress) {
         console.log('[ARC API] Returning cached data from', recentProgress.timestamp);
         const progress = calculateAGIProgress(recentProgress.topScore);
+        const benchmarkEvidence = classifyARCBenchmarkEvidence(recentProgress.topScore, 'cached_fresh');
         return NextResponse.json({
           success: true,
           data: {
             progress,
+            benchmarkEvidence,
             topScore: recentProgress.topScore,
+            gapToHuman: 1.0 - recentProgress.topScore,
             baseline: recentProgress.baseline,
             status: recentProgress.status,
             source: recentProgress.source,
+            sourceStatus: 'cached_fresh',
             timestamp: recentProgress.timestamp,
             cached: true
           }
@@ -59,6 +64,7 @@ export async function GET(request: NextRequest) {
     // Fetch fresh data from all sources
     const arcData = await fetchAllARCData();
     const progress = calculateAGIProgress(arcData.summary.topScore);
+    const benchmarkEvidence = arcData.summary.benchmarkEvidence;
 
     // Store progress snapshot in database
     if (isDbEnabled) {
@@ -74,6 +80,8 @@ export async function GET(request: NextRequest) {
           totalTeams: arcData.summary.totalTeams,
           recentActivity: arcData.summary.recentActivity,
           significantEvents: arcData.summary.significantEvents.length,
+          sourceStatus: arcData.summary.sourceStatus,
+          benchmarkEvidence,
           sources: {
             official: !!arcData.official,
             kaggle: arcData.kaggle.length,
@@ -94,9 +102,17 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         progress,
+        benchmarkEvidence,
         summary: arcData.summary,
+        topScore: arcData.summary.topScore,
+        gapToHuman: arcData.summary.gapToHuman,
+        sourceStatus: arcData.summary.sourceStatus,
         official: arcData.official ? {
           topScore: arcData.official.topScore,
+          sourceStatus: arcData.official.sourceStatus,
+          sourceUrl: arcData.official.sourceUrl,
+          limitations: arcData.official.limitations,
+          lastKnownSnapshot: arcData.official.lastKnownSnapshot,
           entriesCount: arcData.official.entries.length,
           topTeams: arcData.official.entries.slice(0, 5)
         } : null,
@@ -146,6 +162,7 @@ export async function POST(request: NextRequest) {
 
     const arcData = await fetchAllARCData();
     const progress = calculateAGIProgress(arcData.summary.topScore);
+    const benchmarkEvidence = arcData.summary.benchmarkEvidence;
 
     if (isDbEnabled) {
       await insert(`
@@ -159,7 +176,9 @@ export async function POST(request: NextRequest) {
         JSON.stringify({
           totalTeams: arcData.summary.totalTeams,
           recentActivity: arcData.summary.recentActivity,
-          significantEvents: arcData.summary.significantEvents.length
+          significantEvents: arcData.summary.significantEvents.length,
+          sourceStatus: arcData.summary.sourceStatus,
+          benchmarkEvidence
         })
       ]);
     }
@@ -170,7 +189,11 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         progress,
+        benchmarkEvidence,
         summary: arcData.summary,
+        topScore: arcData.summary.topScore,
+        gapToHuman: arcData.summary.gapToHuman,
+        sourceStatus: arcData.summary.sourceStatus,
         timestamp: arcData.timestamp,
         refreshed: true
       }

@@ -6,9 +6,13 @@ export interface AGIProgressData {
   topScore: number;
   humanBaseline: number;
   gapToHuman: number;
-  status: 'baseline' | 'improving' | 'significant' | 'breakthrough' | 'near_agi' | 'agi';
+  status: 'baseline' | 'watch' | 'notable' | 'strong' | 'exceptional';
   description: string;
   lastUpdated?: string;
+  sourceStatus?: string;
+  evidenceConfidence?: string;
+  watchPriority?: string;
+  limitations?: string[];
 }
 
 interface AGIProgressIndicatorProps {
@@ -21,7 +25,7 @@ const defaultData: AGIProgressData = {
   humanBaseline: 1.0,
   gapToHuman: 0.96,
   status: 'baseline',
-  description: 'Baseline - current AI capabilities on novel reasoning'
+  description: 'Baseline ARC-AGI benchmark signal'
 };
 
 export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
@@ -30,8 +34,7 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
 }) => {
   const progressData = data || defaultData;
 
-  // Calculate normalized progress (0-100)
-  // 4% is baseline (0% progress), 100% is AGI (100% progress)
+  // Calculate normalized benchmark movement (0-100). This is not an AGI meter.
   const baseline = 0.04;
   const normalizedProgress = Math.max(0, Math.min(100,
     ((progressData.topScore - baseline) / (1 - baseline)) * 100
@@ -39,11 +42,10 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'agi': return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-500', glow: 'shadow-purple-500/50' };
-      case 'near_agi': return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-500', glow: 'shadow-red-500/50' };
-      case 'breakthrough': return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-500', glow: 'shadow-orange-500/50' };
-      case 'significant': return { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-500', glow: 'shadow-yellow-500/50' };
-      case 'improving': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-500', glow: 'shadow-blue-500/50' };
+      case 'exceptional': return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-500', glow: 'shadow-red-500/50' };
+      case 'strong': return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-500', glow: 'shadow-orange-500/50' };
+      case 'notable': return { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-500', glow: 'shadow-yellow-500/50' };
+      case 'watch': return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-500', glow: 'shadow-blue-500/50' };
       default: return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-500', glow: 'shadow-green-500/50' };
     }
   };
@@ -51,7 +53,7 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
   const statusColors = getStatusColor(progressData.status);
 
   const getProgressBarColor = (progress: number) => {
-    if (progress >= 75) return 'bg-gradient-to-r from-red-500 to-purple-500';
+    if (progress >= 75) return 'bg-gradient-to-r from-red-500 to-orange-500';
     if (progress >= 50) return 'bg-gradient-to-r from-orange-500 to-red-500';
     if (progress >= 25) return 'bg-gradient-to-r from-yellow-500 to-orange-500';
     if (progress >= 10) return 'bg-gradient-to-r from-blue-500 to-yellow-500';
@@ -74,12 +76,12 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
   }
 
   return (
-    <div className={`bg-[var(--surface)] rounded-xl p-6 border-2 ${statusColors.border} shadow-lg ${progressData.status === 'agi' || progressData.status === 'near_agi' ? 'animate-pulse ' + statusColors.glow : ''}`}>
+    <div className={`bg-[var(--surface)] rounded-xl p-6 border-2 ${statusColors.border} shadow-lg ${progressData.status === 'exceptional' ? 'animate-pulse ' + statusColors.glow : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-[var(--foreground)]">AGI Progress Indicator</h3>
-          <p className="text-xs text-[var(--muted)] mt-1">Based on ARC-AGI-2 Benchmark</p>
+          <h3 className="text-lg font-semibold text-[var(--foreground)]">Signal Dashboard</h3>
+          <p className="text-xs text-[var(--muted)] mt-1">ARC-AGI-2 benchmark evidence, not an AGI meter</p>
         </div>
         <div className={`px-3 py-1.5 rounded-full text-sm font-semibold ${statusColors.bg} ${statusColors.text}`}>
           {progressData.status.replace('_', ' ').toUpperCase()}
@@ -89,18 +91,18 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
       {/* Key Definition */}
       <div className="bg-[var(--surface-hover)] rounded-lg p-4 mb-6 border-l-4" style={{ borderColor: 'var(--accent-cyan)' }}>
         <p className="text-sm text-[var(--foreground)] font-medium italic">
-          &quot;When no remaining tasks challenge AI while remaining accessible to humans, AGI is achieved.&quot;
+          &quot;Detect everything plausible; label nothing as true until evidence supports it.&quot;
         </p>
         <p className="text-xs text-[var(--muted)] mt-2">
-          - ARC Prize Definition
+          Signal assessment rule
         </p>
       </div>
 
       {/* Progress Bar */}
       <div className="mb-6">
         <div className="flex justify-between text-xs text-[var(--muted)] mb-2">
-          <span>Current AI (Baseline 4%)</span>
-          <span>Human Performance (100%)</span>
+          <span>Launch baseline 4%</span>
+          <span>Benchmark human baseline 100%</span>
         </div>
         <div className="relative h-6 bg-[var(--surface-hover)] rounded-full overflow-hidden">
           <div
@@ -114,7 +116,7 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
           />
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-xs font-bold text-[var(--foreground)] drop-shadow-sm">
-              {normalizedProgress.toFixed(1)}% toward AGI
+              {normalizedProgress.toFixed(1)}% benchmark movement
             </span>
           </div>
         </div>
@@ -147,10 +149,30 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="bg-[var(--surface-hover)] rounded-lg p-3">
+          <div className="text-xs text-[var(--muted)]">Watch Priority</div>
+          <div className="text-sm font-semibold text-[var(--foreground)]">
+            {(progressData.watchPriority || progressData.status).replace('_', ' ').toUpperCase()}
+          </div>
+        </div>
+        <div className="bg-[var(--surface-hover)] rounded-lg p-3">
+          <div className="text-xs text-[var(--muted)]">Evidence Confidence</div>
+          <div className="text-sm font-semibold text-[var(--foreground)]">
+            {(progressData.evidenceConfidence || 'weak').replace('_', ' ').toUpperCase()}
+          </div>
+        </div>
+      </div>
+
       {/* Status Description */}
       <div className="text-sm text-[var(--muted)] mb-3">
         {progressData.description}
       </div>
+      {(progressData.limitations || []).length > 0 && (
+        <div className="text-xs text-[var(--muted)] bg-[var(--surface-hover)] rounded-lg p-3 mb-3">
+          {(progressData.limitations || []).slice(0, 3).join(' ')}
+        </div>
+      )}
 
       {/* Threshold Legend */}
       <div className="border-t border-[var(--border)] pt-4 mt-4">
@@ -158,11 +180,10 @@ export const AGIProgressIndicator: React.FC<AGIProgressIndicatorProps> = ({
         <div className="flex flex-wrap gap-2">
           {[
             { label: 'Baseline', range: '0-10%', color: 'bg-green-500' },
-            { label: 'Improving', range: '10-25%', color: 'bg-blue-500' },
-            { label: 'Significant', range: '25-50%', color: 'bg-yellow-500' },
-            { label: 'Breakthrough', range: '50-75%', color: 'bg-orange-500' },
-            { label: 'Near AGI', range: '75-99%', color: 'bg-red-500' },
-            { label: 'AGI', range: '100%', color: 'bg-purple-500' },
+            { label: 'Watch', range: '10-25%', color: 'bg-blue-500' },
+            { label: 'Notable', range: '25-50%', color: 'bg-yellow-500' },
+            { label: 'Strong', range: '50-75%', color: 'bg-orange-500' },
+            { label: 'Exceptional', range: '75%+', color: 'bg-red-500' },
           ].map((threshold) => (
             <div key={threshold.label} className="flex items-center space-x-1">
               <div className={`w-2 h-2 rounded-full ${threshold.color}`} />

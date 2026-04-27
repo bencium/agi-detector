@@ -1,11 +1,17 @@
 /**
- * Tests for AGI Progress Calculation
- * Tests ARC-AGI benchmark progress tracking and status determination
+ * Tests for ARC-AGI benchmark signal classification.
+ * ARC is treated as benchmark evidence, not an AGI meter.
  */
 
-import { calculateAGIProgress, arcDataToCrawlResults, ARCAggregatedData, ARCSummary } from '@/lib/arc-sources/index';
+import {
+  calculateAGIProgress,
+  classifyARCBenchmarkEvidence,
+  arcDataToCrawlResults,
+  ARCAggregatedData,
+  ARCSummary
+} from '@/lib/arc-sources/index';
 
-describe('AGI Progress Calculation', () => {
+describe('ARC benchmark signal calculation', () => {
   describe('calculateAGIProgress', () => {
     it('should return baseline status for scores at baseline (4%)', () => {
       const result = calculateAGIProgress(0.04);
@@ -22,44 +28,44 @@ describe('AGI Progress Calculation', () => {
       expect(result.progress).toBe(0);
     });
 
-    it('should return improving status for scores 10-25%', () => {
+    it('should return watch status for scores 10-25%', () => {
       const result = calculateAGIProgress(0.10);
 
-      expect(result.status).toBe('improving');
-      expect(result.description).toContain('improvement');
+      expect(result.status).toBe('watch');
+      expect(result.description).toContain('watch signal');
     });
 
-    it('should return significant status for scores 25-50%', () => {
+    it('should return notable status for scores 25-50%', () => {
       const result = calculateAGIProgress(0.30);
 
-      expect(result.status).toBe('significant');
-      expect(result.description).toContain('Significant');
+      expect(result.status).toBe('notable');
+      expect(result.description).toContain('Notable');
     });
 
-    it('should return breakthrough status for scores 50-75%', () => {
+    it('should return strong status for scores 50-75%', () => {
       const result = calculateAGIProgress(0.55);
 
-      expect(result.status).toBe('breakthrough');
-      expect(result.description).toContain('breakthrough');
+      expect(result.status).toBe('strong');
+      expect(result.description).toContain('Strong');
     });
 
-    it('should return near_agi status for scores 75-100%', () => {
+    it('should return exceptional status for scores 75-100%', () => {
       const result = calculateAGIProgress(0.80);
 
-      expect(result.status).toBe('near_agi');
-      expect(result.description).toContain('Near AGI');
+      expect(result.status).toBe('exceptional');
+      expect(result.description).toContain('Exceptional');
     });
 
-    it('should return agi status for perfect score', () => {
+    it('should not return agi status for perfect score', () => {
       const result = calculateAGIProgress(1.0);
 
-      expect(result.status).toBe('agi');
-      expect(result.description).toContain('AGI achieved');
+      expect(result.status).toBe('exceptional');
+      expect(result.description).not.toMatch(/AGI achieved|Near AGI/i);
     });
 
     it('should calculate correct progress percentage', () => {
       // 4% is 0 progress (baseline)
-      // 100% is 100% progress (AGI)
+      // 100% is full benchmark movement, not an AGI conclusion.
       // The formula: (score - 0.04) / (1 - 0.04) * 100
 
       // At baseline (4%)
@@ -80,11 +86,11 @@ describe('AGI Progress Calculation', () => {
 
       // Slightly above threshold
       const justAbove = calculateAGIProgress(0.251);
-      expect(justAbove.status).toBe('significant');
+      expect(justAbove.status).toBe('notable');
 
       // Exactly at threshold
       const exactHigh = calculateAGIProgress(0.75);
-      expect(exactHigh.status).toBe('near_agi');
+      expect(exactHigh.status).toBe('exceptional');
     });
 
     it('should cap progress at 100%', () => {
@@ -105,15 +111,15 @@ describe('AGI Progress Calculation', () => {
       const boundaries = [
         { score: 0.04, expected: 'baseline' },
         { score: 0.09, expected: 'baseline' },
-        { score: 0.10, expected: 'improving' },
-        { score: 0.24, expected: 'improving' },
-        { score: 0.25, expected: 'significant' },
-        { score: 0.49, expected: 'significant' },
-        { score: 0.50, expected: 'breakthrough' },
-        { score: 0.74, expected: 'breakthrough' },
-        { score: 0.75, expected: 'near_agi' },
-        { score: 0.99, expected: 'near_agi' },
-        { score: 1.00, expected: 'agi' }
+        { score: 0.10, expected: 'watch' },
+        { score: 0.24, expected: 'watch' },
+        { score: 0.25, expected: 'notable' },
+        { score: 0.49, expected: 'notable' },
+        { score: 0.50, expected: 'strong' },
+        { score: 0.74, expected: 'strong' },
+        { score: 0.75, expected: 'exceptional' },
+        { score: 0.99, expected: 'exceptional' },
+        { score: 1.00, expected: 'exceptional' }
       ];
 
       boundaries.forEach(({ score, expected }) => {
@@ -130,7 +136,9 @@ describe('AGI Progress Calculation', () => {
       gapToHuman: 0.85,
       totalTeams: 50,
       recentActivity: 10,
-      significantEvents: []
+      significantEvents: [],
+      sourceStatus: 'live',
+      benchmarkEvidence: classifyARCBenchmarkEvidence(0.15, 'live')
     };
 
     it('should create summary crawl result', () => {
@@ -148,7 +156,7 @@ describe('AGI Progress Calculation', () => {
 
       const summaryResult = results.find(r => r.metadata?.type === 'benchmark_summary');
       expect(summaryResult).toBeDefined();
-      expect(summaryResult?.title).toContain('ARC-AGI Progress Summary');
+      expect(summaryResult?.title).toContain('ARC-AGI Benchmark Signal');
       expect(summaryResult?.metadata.topScore).toBe(0.15);
     });
 
@@ -185,6 +193,8 @@ describe('AGI Progress Calculation', () => {
       expect(summaryResult?.metadata).toHaveProperty('topScore');
       expect(summaryResult?.metadata).toHaveProperty('gap');
       expect(summaryResult?.metadata).toHaveProperty('eventCount');
+      expect(summaryResult?.metadata).toHaveProperty('sourceStatus');
+      expect(summaryResult?.metadata).toHaveProperty('benchmarkEvidence');
     });
 
     it('should handle data with official leaderboard', () => {
@@ -197,7 +207,9 @@ describe('AGI Progress Calculation', () => {
           ],
           timestamp: '2025-01-15T10:00:00Z',
           humanBaseline: 1.0,
-          gap: 0.88
+          gap: 0.88,
+          sourceStatus: 'live',
+          sourceUrl: 'https://arcprize.org/leaderboard'
         },
         kaggle: [],
         github: null,
@@ -223,7 +235,9 @@ describe('AGI Progress Calculation', () => {
           gapToHuman: 1.0,
           totalTeams: 0,
           recentActivity: 0,
-          significantEvents: []
+          significantEvents: [],
+          sourceStatus: 'unavailable',
+          benchmarkEvidence: classifyARCBenchmarkEvidence(0, 'unavailable')
         }
       };
 
@@ -239,34 +253,34 @@ describe('AGI Progress Calculation', () => {
       const result = calculateAGIProgress(0.04);
 
       expect(result.status).toBe('baseline');
-      expect(result.description).toContain('current AI capabilities');
+      expect(result.description).toContain('Baseline ARC-AGI');
     });
 
     it('should flag significant improvement if scores jump to 15%', () => {
       const result = calculateAGIProgress(0.15);
 
-      expect(result.status).toBe('improving');
+      expect(result.status).toBe('watch');
       expect(result.progress).toBeGreaterThan(0);
     });
 
-    it('should alert for major breakthrough at 30%', () => {
+    it('should mark notable benchmark movement at 30%', () => {
       const result = calculateAGIProgress(0.30);
 
-      expect(result.status).toBe('significant');
-      expect(result.description).toContain('Significant');
+      expect(result.status).toBe('notable');
+      expect(result.description).toContain('Notable');
     });
 
-    it('should trigger high alert at 60%', () => {
+    it('should trigger strong benchmark watch at 60%', () => {
       const result = calculateAGIProgress(0.60);
 
-      expect(result.status).toBe('breakthrough');
+      expect(result.status).toBe('strong');
     });
 
-    it('should indicate near-AGI at 85%', () => {
+    it('should indicate exceptional benchmark evidence at 85%', () => {
       const result = calculateAGIProgress(0.85);
 
-      expect(result.status).toBe('near_agi');
-      expect(result.description).toContain('exceeds most humans');
+      expect(result.status).toBe('exceptional');
+      expect(result.description).not.toContain('AGI achieved');
     });
   });
 
@@ -288,12 +302,30 @@ describe('AGI Progress Calculation', () => {
 
       expect(statuses).toEqual([
         'baseline',
-        'improving',
-        'significant',
-        'breakthrough',
-        'near_agi',
-        'agi'
+        'watch',
+        'notable',
+        'strong',
+        'exceptional',
+        'exceptional'
       ]);
+    });
+  });
+
+  describe('classifyARCBenchmarkEvidence', () => {
+    it('keeps ARC evidence separate from AGI conclusions', () => {
+      const result = classifyARCBenchmarkEvidence(1.0, 'live');
+
+      expect(result.status).toBe('exceptional');
+      expect(result.interpretation).not.toMatch(/AGI achieved|ASI/i);
+      expect(result.limitations.join(' ')).toContain('not an AGI or ASI meter');
+    });
+
+    it('marks manual snapshots as weak evidence', () => {
+      const result = classifyARCBenchmarkEvidence(0.2403, 'manual_snapshot');
+
+      expect(result.sourceStatus).toBe('manual_snapshot');
+      expect(result.evidenceConfidence).toBe('weak');
+      expect(result.limitations.join(' ')).toContain('not fresh live evidence');
     });
   });
 });

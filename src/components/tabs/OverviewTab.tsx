@@ -198,7 +198,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         </div>
       </div>
 
-      {/* AGI Progress Indicator */}
+      {/* ARC benchmark signal dashboard */}
       <AGIProgressIndicator data={arcProgressData} isLoading={isInitialLoading} />
 
       {/* ARC Challenge Categories */}

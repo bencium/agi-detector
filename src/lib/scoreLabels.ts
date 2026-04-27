@@ -1,4 +1,5 @@
-// Human-readable score labels for AGI risk assessment
+// Human-readable labels for AGI signal assessment. These labels describe
+// watch priority, not proven AGI/ASI conclusions.
 
 export interface ScoreLabel {
   label: string;
@@ -10,7 +11,7 @@ export interface ScoreLabel {
 export const getScoreLabel = (score: number): ScoreLabel => {
   if (score < 0.1) {
     return {
-      label: 'No AGI Relevance',
+      label: 'No clear signal',
       color: 'gray',
       bgColor: 'bg-gray-100',
       textColor: 'text-gray-600'
@@ -18,7 +19,7 @@ export const getScoreLabel = (score: number): ScoreLabel => {
   }
   if (score < 0.3) {
     return {
-      label: 'Minor Progress',
+      label: 'Low-watch signal',
       color: 'blue',
       bgColor: 'bg-blue-100',
       textColor: 'text-blue-600'
@@ -26,7 +27,7 @@ export const getScoreLabel = (score: number): ScoreLabel => {
   }
   if (score < 0.5) {
     return {
-      label: 'Significant Development',
+      label: 'Needs review',
       color: 'yellow',
       bgColor: 'bg-yellow-100',
       textColor: 'text-yellow-700'
@@ -34,14 +35,14 @@ export const getScoreLabel = (score: number): ScoreLabel => {
   }
   if (score < 0.7) {
     return {
-      label: 'Major Breakthrough',
+      label: 'High-watch signal',
       color: 'orange',
       bgColor: 'bg-orange-100',
       textColor: 'text-orange-700'
     };
   }
   return {
-    label: 'Critical AGI Signal',
+    label: 'Critical watch signal',
     color: 'red',
     bgColor: 'bg-red-100',
     textColor: 'text-red-700'

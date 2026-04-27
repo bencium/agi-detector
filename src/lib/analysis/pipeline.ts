@@ -20,6 +20,7 @@ import { runLayer0Triage } from '@/lib/analysis/triage';
 import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
 import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
 import { ensureEvidenceClaimsForCrawl } from '@/lib/evidence/storage';
+import { assessSignal, type Corroboration, type SourceStatus } from '@/lib/methodology/signals';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -373,6 +374,22 @@ export async function analyzeArticle(
     signals,
   });
 
+  const sourceStatus = ((metadata as Record<string, unknown> | null)?.sourceStatus as SourceStatus | undefined) || 'live';
+  const corroboration: Corroboration =
+    crossReferences.length > 0 && corroborationPenalty === 0
+      ? 'same_source'
+      : 'none';
+  const signalAssessment = assessSignal({
+    claims: mergedClaims,
+    content: crawlResult.content,
+    sourceStatus,
+    corroboration,
+    modelScore,
+    heuristicScore: heuristic.score,
+    secrecyBoost,
+    sourceName,
+  });
+
   // ------------------------------------------------------------------
   // 9. Severity with evidence gate
   // ------------------------------------------------------------------
@@ -416,7 +433,10 @@ export async function analyzeArticle(
       embeddingValue,
       modelScore,
       heuristic.score,
-      JSON.stringify(combined.breakdown),
+      JSON.stringify({
+        ...combined.breakdown,
+        signalAssessment,
+      }),
     ]
   );
 

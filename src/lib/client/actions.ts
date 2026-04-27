@@ -169,11 +169,11 @@ export async function fetchARCProgress(store: AppStore): Promise<void> {
   const state = getState(store);
 
   try {
-    state.addLog('Fetching ARC-AGI progress data...');
+    state.addLog('Fetching ARC-AGI benchmark signal data...');
     const response = await apiFetch('/api/arc');
     const data = await response.json();
     if (data.success && data.data) {
-      const progress = data.data.progress || data.data;
+      const progress = data.data.benchmarkEvidence || data.data.progress || data.data;
       const topScore = data.data.topScore || progress.topScore || 0.04;
       const gapToHuman = data.data.gapToHuman || 1.0 - topScore;
       state.setArcProgressData({
@@ -181,16 +181,20 @@ export async function fetchARCProgress(store: AppStore): Promise<void> {
         humanBaseline: 1.0,
         gapToHuman,
         status: progress.status || data.data.status || 'baseline',
-        description: progress.description || 'Baseline - current AI capabilities',
+        description: progress.interpretation || progress.description || 'Baseline ARC-AGI benchmark signal',
         lastUpdated: data.data.timestamp || new Date().toISOString(),
+        sourceStatus: progress.sourceStatus || data.data.sourceStatus,
+        evidenceConfidence: progress.evidenceConfidence,
+        watchPriority: progress.watchPriority,
+        limitations: progress.limitations,
       });
       state.addLog(
-        `ARC Progress: ${(topScore * 100).toFixed(1)}% (${progress.status || data.data.status || 'baseline'})`
+        `ARC benchmark signal: ${(topScore * 100).toFixed(1)}% (${progress.status || data.data.status || 'baseline'})`
       );
     }
   } catch (error) {
     console.error('Failed to fetch ARC progress:', error);
-    state.addLog('ARC data fetch failed - using defaults');
+    state.addLog('ARC signal fetch failed - using defaults');
   }
 }
 

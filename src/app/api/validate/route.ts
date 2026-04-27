@@ -15,25 +15,25 @@ import {
 } from '@/lib/detection/silence-patterns';
 import { shouldTranslateCjk, translateToEnglish } from '@/lib/analysis/translation';
 import { EvidenceSnippet, extractEvidenceClaims } from '@/lib/evidence/extract';
+import { assessSignal, type Corroboration, type SourceStatus } from '@/lib/methodology/signals';
 
 const validateRequestSchema = z.object({
   analysisId: z.string().uuid('Invalid analysis ID format')
 });
 
-const VALIDATION_PROMPT = `You are a second-opinion AI safety expert validating a previous AGI detection analysis. Your role is to ensure NO AGI progress is missed or downplayed.
+const VALIDATION_PROMPT = `You are a skeptical second-opinion AI safety analyst validating a previous AGI signal assessment. Your role is to catch both missed signals and false alarms.
 
 Previous analysis found:
 Score: {score}
 Indicators: {indicators}
 Severity: {severity}
 
-Review the content and provide an independent assessment. Be EXTRA vigilant for:
-1. Any missed AGI indicators
-2. Signs of capability jumps or emergent behaviors
-3. Architectural breakthroughs that could lead to AGI
-4. ANY progress toward human-level AI
+Review the content and provide an independent assessment. Separate:
+1. Signal: what is worth noticing
+2. Evidence: what is actually supported by the source
+3. Conclusion: what can honestly be inferred
 
-IMPORTANT: If in doubt, err on the side of caution and flag it as AGI-relevant.
+Be aggressive about noticing plausible signals, but conservative about truth claims. A single benchmark, single article, rumor, press release, or model output is not enough to claim AGI or ASI. You may lower or dismiss the prior score if the evidence is weak, stale, narrow, promotional, or uncorroborated.
 
 Provide your validation as JSON:
 {
@@ -41,7 +41,8 @@ Provide your validation as JSON:
   "validatedScore": number,
   "reasoning": string,
   "additionalIndicators": string[],
-  "recommendation": "confirm" | "investigate" | "dismiss"
+  "recommendation": "raise" | "hold" | "lower" | "dismiss" | "investigate",
+  "uncertaintyReason": string
 }`;
 
 interface AnalysisWithCrawl {
@@ -58,6 +59,7 @@ interface AnalysisWithCrawl {
   metadata?: {
     source?: string;
     timestamp?: string;
+    sourceStatus?: SourceStatus;
     evidence?: {
       snippets?: string[];
       claims?: Array<{
@@ -163,7 +165,8 @@ export async function POST(request: Request) {
       validatedScore: 0,
       reasoning: 'Failed to parse validation response',
       additionalIndicators: [],
-      recommendation: 'investigate'
+      recommendation: 'investigate',
+      uncertaintyReason: 'Validation response could not be parsed'
     });
 
     // Check cross-references for high severity analyses
@@ -182,8 +185,13 @@ export async function POST(request: Request) {
     const hasCorroboration = crossReferenceResults.some(r => r.found);
     const corroborationPenalty = checkedCrossRefs && hasCrossRefs && !hasCorroboration ? 0.2 : 0;
 
-    // Calculate final score and confidence
-    const modelScore = validationResult.validatedScore || analysis.modelScore || analysis.score;
+    // Calculate final score and confidence. Validation is intentionally two-way:
+    // it may raise, hold, lower, or dismiss the previous score.
+    const rawValidatedScore =
+      typeof validationResult.validatedScore === 'number'
+        ? validationResult.validatedScore
+        : analysis.modelScore ?? analysis.score;
+    const modelScore = Math.max(0, Math.min(1, rawValidatedScore));
     const claims = analysis.metadata?.evidence?.claims || [];
     let translatedClaims: ReturnType<typeof extractEvidenceClaims> = [];
     if (translatedSnippets.length > 0) {
@@ -227,30 +235,57 @@ export async function POST(request: Request) {
       signals
     });
 
-    const penaltyAdjustedPrior = Math.max(0, analysis.score - corroborationPenalty);
-    const finalScore = Math.max(penaltyAdjustedPrior, combined.combinedScore);
+    const recommendation = validationResult.recommendation || 'investigate';
+    let finalScore = combined.combinedScore;
+    if (recommendation === 'hold') {
+      finalScore = Math.max(0, analysis.score - corroborationPenalty);
+    } else if (recommendation === 'lower') {
+      finalScore = Math.min(Math.max(0, analysis.score - 0.1 - corroborationPenalty), combined.combinedScore);
+    } else if (recommendation === 'dismiss') {
+      finalScore = Math.min(0.2, combined.combinedScore);
+    } else if (recommendation === 'investigate') {
+      finalScore = Math.min(Math.max(analysis.score, combined.combinedScore), Math.max(0.35, analysis.score));
+    }
+    finalScore = Math.max(0, Math.min(1, finalScore));
 
     const prevConfidence = analysis.confidence;
     const addedIndicators = (validationResult.additionalIndicators || []).length;
-    const newConfidence = Math.min(1, prevConfidence + (validationResult.agrees ? 0.2 : 0.1));
+    const newConfidence = recommendation === 'dismiss' || recommendation === 'lower'
+      ? Math.max(0, prevConfidence - 0.1)
+      : Math.min(1, prevConfidence + (validationResult.agrees ? 0.2 : 0.1));
+    const corroboration: Corroboration = hasCorroboration ? 'independent_source' : hasCrossRefs ? 'same_source' : 'none';
+    const sourceStatus = analysis.metadata?.sourceStatus || 'live';
+    const signalAssessment = assessSignal({
+      claims: mergedClaims,
+      content: analysis.content,
+      sourceStatus,
+      corroboration,
+      modelScore,
+      heuristicScore: heuristic.score,
+      secrecyBoost,
+      sourceName: analysis.metadata?.source
+    });
 
     const lastValidation = {
       prevScore: analysis.score,
       newScore: finalScore,
+      scoreDelta: finalScore - analysis.score,
       prevConfidence,
       newConfidence,
       addedIndicators,
-      recommendation: validationResult.recommendation || 'investigate',
+      recommendation,
+      uncertaintyReason: validationResult.uncertaintyReason || signalAssessment.uncertaintyReason,
       timestamp: new Date().toISOString(),
       modelScore,
       heuristicScore: heuristic.score,
-      corroborationPenalty
+      corroborationPenalty,
+      signalAssessment
     };
 
     const hasDelta = hasBenchmarkDelta(mergedClaims);
     let newSeverity = severityForScore(finalScore);
     newSeverity = enforceCriticalEvidenceGate(newSeverity, hasDelta);
-    newSeverity = applyValidationOverride(newSeverity, validationResult.recommendation);
+    newSeverity = applyValidationOverride(newSeverity, recommendation);
 
     // Merge indicators
     const mergedIndicators = [...new Set([...analysis.indicators, ...(validationResult.additionalIndicators || [])])];
@@ -271,7 +306,20 @@ export async function POST(request: Request) {
         "heuristicScore" = $7,
         "scoreBreakdown" = $8
       WHERE id = $9
-    `, [newConfidence, finalScore, newSeverity, mergedIndicators, JSON.stringify(lastValidation), modelScore, heuristic.score, JSON.stringify(combined.breakdown), analysisId]);
+    `, [
+      newConfidence,
+      finalScore,
+      newSeverity,
+      mergedIndicators,
+      JSON.stringify(lastValidation),
+      modelScore,
+      heuristic.score,
+      JSON.stringify({
+        ...combined.breakdown,
+        signalAssessment
+      }),
+      analysisId
+    ]);
 
     // Get updated analysis
     const updatedAnalysis = await queryOne<{
@@ -290,7 +338,13 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       data: {
-        validation: validationResult,
+        validation: {
+          ...validationResult,
+          previousScore: analysis.score,
+          validatedScore: finalScore,
+          scoreDelta: finalScore - analysis.score,
+          signalAssessment
+        },
         crossReferenceResults,
         updatedAnalysis
       }

@@ -127,7 +127,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
             </h3>
             <p className="text-sm text-[var(--muted)]">
               Articles that are semantically &quot;unusual&quot; - far from the cluster center of typical content.
-              Useful for AGI detection since breakthroughs might look different from standard research.
+              Useful for signal detection because unusual items may deserve review, even when evidence is weak.
             </p>
           </div>
           <button
@@ -195,7 +195,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
                 <div className="text-sm text-[var(--muted)]">
-                  Found {sortedAnomalies.length} semantic outliers, ranked by {sortBy === 'distance' ? 'distance' : 'AGI score'} · Min AGI 20%
+                  Found {sortedAnomalies.length} semantic outliers, ranked by {sortBy === 'distance' ? 'distance' : 'watch score'} · Min watch score 20%
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-[var(--muted)]">Sort by</span>
@@ -212,7 +212,7 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
                       onClick={() => setSortBy('score')}
                       className={`px-3 py-1 ${sortBy === 'score' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] text-[var(--muted)]'}`}
                     >
-                      AGI Score
+                      Watch Score
                     </button>
                   </div>
                 </div>
@@ -267,9 +267,9 @@ export const AnomalyDetection: React.FC<AnomalyDetectionProps> = ({
                             Percentile: <span className="font-mono font-medium text-[var(--foreground)]">P{percentile}</span>
                           </span>
 
-                          {/* AGI Score */}
+                          {/* Watch Score */}
                           <span className={`text-xs font-medium ${getScoreColor(anomaly.score)}`}>
-                            AGI Score: {Math.round(anomaly.score * 100)}%
+                            Watch Score: {Math.round(anomaly.score * 100)}%
                           </span>
                         </div>
 

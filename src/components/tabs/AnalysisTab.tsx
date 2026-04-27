@@ -28,14 +28,26 @@ const AnalysisCard: React.FC<{
   const breakdown = (analysis.scoreBreakdown || {}) as Record<string, unknown>;
   const secrecyBoost = typeof breakdown.secrecyBoost === 'number' ? breakdown.secrecyBoost : 0;
   const corroborationPenalty = typeof breakdown.corroborationPenalty === 'number' ? breakdown.corroborationPenalty : 0;
+  const signalAssessment = (breakdown.signalAssessment || {}) as Record<string, unknown>;
+  const watchPriority = typeof signalAssessment.watchPriority === 'string' ? signalAssessment.watchPriority : analysis.severity || 'low';
+  const evidenceConfidence = typeof signalAssessment.evidenceConfidence === 'string' ? signalAssessment.evidenceConfidence : analysis.evidenceQuality || 'weak';
+  const uncertaintyReason = typeof signalAssessment.uncertaintyReason === 'string'
+    ? signalAssessment.uncertaintyReason
+    : 'This is a signal assessment, not a verified AGI conclusion.';
+  const sourceStatus = typeof signalAssessment.sourceStatus === 'string' ? signalAssessment.sourceStatus : 'not_assessed';
+  const requiredVerification = Array.isArray(signalAssessment.requiredVerification)
+    ? signalAssessment.requiredVerification.filter((item): item is string => typeof item === 'string')
+    : [];
+  const claimTypes = Array.isArray(signalAssessment.claimTypes)
+    ? signalAssessment.claimTypes.filter((item): item is string => typeof item === 'string')
+    : [];
   const filteredReason = typeof breakdown.filterReason === 'string' ? breakdown.filterReason : null;
   const claims = analysis.crawl?.metadata?.evidence?.claims || [];
   const deltaClaims = claims.filter(c => c.benchmark && typeof c.delta === 'number');
   const snippetCount = analysis.crawl?.metadata?.evidence?.snippets?.length || 0;
   const severityKey = (analysis.severity || '').toLowerCase();
   const isHighSignal = severityKey === 'high' || severityKey === 'critical';
-  const hasBenchmarkDelta = deltaClaims.length > 0;
-  const potentialSignal = isHighSignal && hasBenchmarkDelta;
+  const potentialSignal = isHighSignal || watchPriority === 'high' || watchPriority === 'critical';
   const modelScoreValue = typeof analysis.modelScore === 'number' ? analysis.modelScore : 0;
   const heuristicScoreValue = typeof analysis.heuristicScore === 'number' ? analysis.heuristicScore : 0;
 
@@ -71,7 +83,7 @@ const AnalysisCard: React.FC<{
               {analysis.crawl?.title || 'Untitled Analysis'}
             </h3>
 
-            {/* Score + Label Row */}
+            {/* Watch + Evidence Row */}
             <div className="flex items-center gap-3 mb-2">
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${scoreLabel.bgColor} ${scoreLabel.textColor}`}>
                 {(analysis.score * 100).toFixed(0)}%
@@ -91,9 +103,20 @@ const AnalysisCard: React.FC<{
               )}
               {potentialSignal && (
                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">
-                  POTENTIAL AGI SIGNAL
+                  NEEDS VERIFICATION
                 </span>
               )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
+              <span className="px-2 py-0.5 rounded bg-[var(--surface-hover)] text-[var(--foreground)]">
+                Watch: {watchPriority.toUpperCase()}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-[var(--surface-hover)] text-[var(--foreground)]">
+                Evidence: {evidenceConfidence.toUpperCase()}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-[var(--surface-hover)] text-[var(--foreground)]">
+                Source status: {sourceStatus.replace('_', ' ').toUpperCase()}
+              </span>
             </div>
 
             {/* Meta info */}
@@ -133,6 +156,21 @@ const AnalysisCard: React.FC<{
             Corroboration -{(corroborationPenalty * 100).toFixed(0)}% ·
             Evidence {claims.length} claims (Δ: {deltaClaims.length}) · {snippetCount} snippets
             {filteredReason && ` · Filtered: ${filteredReason}`}
+          </div>
+
+          <div className="text-xs bg-[var(--surface-hover)] rounded-lg p-3 text-[var(--foreground)]">
+            <div className="font-medium mb-1">Why this may be wrong</div>
+            <div className="text-[var(--muted)]">{uncertaintyReason}</div>
+            {claimTypes.length > 0 && (
+              <div className="mt-2 text-[var(--muted)]">
+                Claim types: {claimTypes.join(', ')}
+              </div>
+            )}
+            {requiredVerification.length > 0 && (
+              <div className="mt-2 text-[var(--muted)]">
+                Needs: {requiredVerification.join('; ')}
+              </div>
+            )}
           </div>
 
           {/* Indicators */}
@@ -243,11 +281,11 @@ const AnalysisCard: React.FC<{
                   onClick={() => onValidate(analysis.id)}
                   disabled={validatingId === analysis.id}
                   className="px-3 py-1 text-sm bg-[var(--accent)] text-white rounded-lg hover:bg-[var(--accent-hover)] disabled:opacity-50"
-                  title="Get a second AI opinion to find additional AGI indicators"
+                  title="Get a second AI opinion that can raise, lower, hold, or dismiss this signal"
                 >
                   {validatingId === analysis.id ? 'Validating...' : 'Validate'}
                 </button>
-                <span className="text-xs text-[var(--muted)]">Get 2nd opinion</span>
+                <span className="text-xs text-[var(--muted)]">Corrective second opinion</span>
               </div>
             )}
             <div className="text-xs text-[var(--muted)]">

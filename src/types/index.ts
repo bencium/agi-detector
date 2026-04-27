@@ -57,12 +57,15 @@ export interface AnalysisResult {
 export interface ValidationMeta {
   prevScore?: number;
   newScore?: number;
+  scoreDelta?: number;
   prevConfidence?: number;
   newConfidence?: number;
   addedIndicators?: number;
   recommendation?: string;
+  uncertaintyReason?: string;
   corroborationPenalty?: number;
   timestamp?: string;
+  signalAssessment?: Record<string, unknown>;
 }
 
 export interface AnalyzeAllResponse {

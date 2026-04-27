@@ -4,12 +4,14 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An advanced monitoring system designed to detect early signs of Artificial General Intelligence (AGI) emergence by analyzing patterns across AI research labs, academic papers, and technology news.
+An advanced monitoring system designed to detect possible signals related to Artificial General Intelligence (AGI) by analyzing patterns across AI research labs, academic papers, benchmarks, and technology news. It is a signal and evidence assessment system, not an oracle.
 
 ## ✨ Recent Improvements
 - **Layer-0 noise filter**: Cheap triage skips obvious non-capability updates before LLM analysis.
 - **Evidence-gated severity**: Critical alerts require real benchmark deltas to reduce false positives.
 - **Corroboration penalties**: Unverified high-claims get a score penalty during validation.
+- **Signal assessment model**: Separates watch priority from evidence confidence so weak evidence is not presented as truth.
+- **Honest source status**: Live, cached, stale, manual snapshot, and unavailable source states are labeled explicitly.
 - **Score transparency**: UI shows model vs heuristic scores, secrecy boost, evidence counts, and penalties.
 - **Smarter anomalies**: Source-grouped clustering + minimum AGI score threshold reduce noise.
 - **CJK normalization**: Chinese text gets tokenization support and optional translation for consistent indicators.
@@ -28,7 +30,7 @@ An advanced monitoring system designed to detect early signs of Artificial Gener
 
 ## 🎯 Project Vision
 
-A sophisticated early-warning system that monitors the AI landscape for genuine indicators of AGI development, distinguishing between normal AI progress and potentially groundbreaking developments that could signal the emergence of AGI.
+A sophisticated early-warning system that monitors the AI landscape for plausible AGI-related signals, distinguishes evidence from interpretation, and shows exactly why any claim may be wrong.
 
 **Concept and AI Agent Orchestration by [Bence Csernak • bencium.io](https://www.bencium.io)**
 
@@ -40,7 +42,7 @@ A sophisticated early-warning system that monitors the AI landscape for genuine 
 - **Real-time Console Output**: Detailed logging shows every article being analyzed, batch progress, and errors
 - **Enhanced Processing Indicators**: Glowing button animation and automatic console expansion during analysis
 - **Real-time Alerts**: Automated detection and severity classification (none/low/medium/high/critical)
-- **Cross-Validation**: Independent verification system that only increases scores (never decreases) to ensure no AGI progress is hidden
+- **Corrective Validation**: Independent verification system that can raise, hold, lower, dismiss, or investigate a signal
 
 ### Advanced Analytics
 - **Historical Tracking**: Complete database of all analyses with trend data
@@ -61,12 +63,11 @@ A sophisticated early-warning system that monitors the AI landscape for genuine 
   - Self-awareness indicators
   - Generalization leaps
 - **Near-term AGI Detection**: Also monitors architectural innovations, benchmark improvements (>10%), multi-modal capabilities, tool use, and chain-of-thought reasoning
-- **Improved Scoring System**:
-  - 0.0-0.1: No AGI relevance
-  - 0.1-0.3: Minor AI advancements
-  - 0.3-0.5: Significant AGI progress
-  - 0.5-0.7: Major breakthrough
-  - 0.7-1.0: Critical AGI development
+- **Improved Signal Assessment**:
+  - Watch priority: low, medium, high, critical
+  - Evidence confidence: none, weak, moderate, strong, extraordinary
+  - Source status: live, cached fresh, cached stale, manual snapshot, unavailable, model inferred
+  - Claim ladder: mentioned, claimed, demonstrated, independently corroborated, replicated, sustained in deployment
 - **Evidence Quality Rating**: Classifies findings as speculative, circumstantial, or direct
 - **Cross-Reference System**: Suggests additional sources for verification
 
@@ -343,7 +344,7 @@ The crawler includes:
 ## 📱 UI Guide
 
 ### Overview Tab
-- **ARC Progress Indicator**: Shows current ARC-AGI-2 benchmark progress toward AGI
+- **Signal Dashboard**: Shows ARC-AGI-2 benchmark evidence without treating it as an AGI meter
 - **Monitoring Status**: Groups sources by type (ARC, Research Labs, News)
 - **Action Buttons**: Start/Stop monitoring, Run Manual Scan with progress bar
 - **Progress Bar**: Shows % complete, ETA, current article during analysis
@@ -353,7 +354,7 @@ The crawler includes:
 - Shows title, content excerpt, source, timestamp, external link
 
 ### Analysis Tab
-- AI-analyzed articles with AGI scores (0-100%)
+- AI-analyzed articles with watch-priority scores, evidence confidence, and uncertainty reasons
 - Color-coded severity badges (critical/high/medium/low/none)
 - Detected indicators, cross-references, explanations
 - Validation button for second-opinion analysis
@@ -384,11 +385,11 @@ The crawler includes:
 3. View risk trends, milestones, and historical patterns
 
 ### Validation System
-1. Articles marked for verification show a "Validate" button with "Get 2nd opinion" text
+1. Articles marked for verification show a "Validate" button with corrective second-opinion text
 2. Click to run independent AI analysis that:
-   - Never decreases scores (only increases)
-   - Finds additional AGI indicators
-   - Increases confidence levels
+   - Can raise, hold, lower, dismiss, or investigate a signal
+   - Finds additional plausible indicators
+   - Adjusts confidence levels up or down
    - Cross-checks with suggested sources
 3. Shows detailed summary with:
    - Score changes (e.g., 5% → 15%)
@@ -403,7 +404,7 @@ The crawler includes:
 - `GET /api/analyze-status?jobId=X` - Poll analysis job progress (%, ETA, current article)
 - `GET /api/data` - Get all crawled articles and analyses with source statistics
 - `GET /api/trends?period={daily|weekly|monthly}` - Fetch trend data
-- `POST /api/validate` - Validate specific analysis results (only increases scores)
+- `POST /api/validate` - Validate specific analysis results; can raise, hold, lower, dismiss, or investigate
 - `POST /api/test-crawler` - Test individual crawler sources
 - `GET /api/arc` - Fetch ARC-AGI benchmark data (official, Kaggle, GitHub)
 - `POST /api/arc` - Force refresh ARC data
@@ -594,12 +595,26 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆕 Recent Updates
 
-### v2.5 — AGI Progress Indicator & Crawler Fixes (December 2025)
+### v2.6 — Honest Signal Assessment Methodology
 
-**AGI Progress Indicator:**
-- Fixed 0% display bug - now correctly shows 20.8% progress toward AGI
-- Based on ARC-AGI-2 benchmark: 24% SOTA vs 4% baseline, normalized to human performance
-- Added real-time progress calculation from official ARC leaderboard data
+**Signal Methodology:**
+- Replaced ARC-only "toward AGI" language with benchmark evidence classification.
+- Added watch priority and evidence confidence as separate concepts.
+- Added source freshness/status labels for live, cached, stale, manual snapshot, and unavailable data.
+- Added uncertainty reasons and required verification metadata to signal assessments.
+- Validation can now lower or dismiss weak signals instead of ratcheting scores upward.
+
+**ARC Benchmark Evidence:**
+- ARC-AGI-2 is treated as benchmark evidence only, not an AGI or ASI meter.
+- Failed live scraping no longer appears as fresh data.
+- Historical/manual snapshots are labeled as manual snapshots with limitations.
+
+### v2.5 — ARC Benchmark Indicator & Crawler Fixes (December 2025)
+
+**ARC Benchmark Indicator:**
+- ARC-AGI-2 results are shown as benchmark movement, not percent toward AGI.
+- Benchmark scores include source status and limitations.
+- Added real-time benchmark signal calculation from official ARC leaderboard data when available.
 
 **Crawler Improvements:**
 - Replaced Firecrawl dependency with native Playwright for Anthropic/DeepMind
@@ -644,7 +659,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - GitHub repository monitoring (arcprize/ARC-AGI-2)
 - Tracks discussions, releases, commits
 - Kaggle and Official leaderboard integration (partial)
-- AGI Progress Indicator component
+- Signal Dashboard component
 
 **New Endpoints:**
 - `GET /api/analyze-status?jobId=X` - Poll job progress
@@ -656,7 +671,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Validation enhancements:
   - Persisted “last validated” metadata on each analysis (timestamp + before/after deltas).
   - Validate button shows for medium+ by default; configurable via `NEXT_PUBLIC_VALIDATION_MIN_SEVERITY` and `NEXT_PUBLIC_VALIDATION_ALWAYS`.
-  - Severity is recomputed from score and never decreases; backfill endpoint provided.
+  - Legacy note: older versions recomputed severity from score and never decreased. Current validation is corrective and may lower weak signals.
 - Trends improvements:
   - Live aggregation now reads from `HistoricalData` (with fallback), so charts reflect real scores without snapshots.
   - One‑time backfill endpoint adds missing historical rows for existing analyses.

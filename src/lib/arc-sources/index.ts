@@ -61,6 +61,20 @@ export interface ARCSummary {
   totalTeams: number;
   recentActivity: number;
   significantEvents: SignificantEvent[];
+  sourceStatus: 'live' | 'cached_fresh' | 'cached_stale' | 'manual_snapshot' | 'unavailable';
+  benchmarkEvidence: ARCBenchmarkEvidence;
+}
+
+export interface ARCBenchmarkEvidence {
+  benchmark: 'ARC-AGI-2';
+  topScore: number;
+  status: 'baseline' | 'watch' | 'notable' | 'strong' | 'exceptional';
+  watchPriority: 'low' | 'medium' | 'high' | 'critical';
+  evidenceConfidence: 'none' | 'weak' | 'moderate' | 'strong';
+  sourceStatus: 'live' | 'cached_fresh' | 'cached_stale' | 'manual_snapshot' | 'unavailable';
+  interpretation: string;
+  limitations: string[];
+  requiredVerification: string[];
 }
 
 export interface SignificantEvent {
@@ -96,6 +110,8 @@ export async function fetchAllARCData(): Promise<ARCAggregatedData> {
   );
 
   const significantEvents = detectAllSignificantEvents(officialData, kaggleData, githubData);
+  const sourceStatus = getAggregateSourceStatus(officialData, kaggleData);
+  const benchmarkEvidence = classifyARCBenchmarkEvidence(topScore, sourceStatus);
 
   const summary: ARCSummary = {
     topScore,
@@ -107,7 +123,9 @@ export async function fetchAllARCData(): Promise<ARCAggregatedData> {
     ),
     recentActivity: (githubData?.discussions.length || 0) +
                     (githubData?.commits.length || 0),
-    significantEvents
+    significantEvents,
+    sourceStatus,
+    benchmarkEvidence
   };
 
   console.log(`[ARC Sources] Aggregated data - Top score: ${(topScore * 100).toFixed(1)}%, Gap to human: ${((1 - topScore) * 100).toFixed(1)}%`);
@@ -131,7 +149,8 @@ function detectAllSignificantEvents(
 ): SignificantEvent[] {
   const events: SignificantEvent[] = [];
 
-  // Check for high scores (>10% is significant, >25% is critical)
+  // Check for high ARC-AGI scores. These are benchmark watch signals, not
+  // direct AGI/ASI claims.
   const maxScore = Math.max(
     official?.topScore || 0,
     kaggle.length > 0 ? Math.max(...kaggle.map(e => e.score)) : 0
@@ -140,17 +159,17 @@ function detectAllSignificantEvents(
   if (maxScore > 0.25) {
     events.push({
       type: 'score_jump',
-      title: 'Major Capability Leap Detected',
-      description: `Top ARC-AGI score exceeds 25% - significant progress toward human-level performance`,
+      title: 'Major ARC-AGI Benchmark Movement',
+      description: `Top ARC-AGI score exceeds 25%. This is a high-watch benchmark signal, not proof of AGI.`,
       url: 'https://arcprize.org/leaderboard',
       date: new Date().toISOString(),
-      severity: 'critical'
+      severity: 'high'
     });
   } else if (maxScore > 0.10) {
     events.push({
       type: 'score_jump',
-      title: 'Significant Breakthrough',
-      description: `Top ARC-AGI score exceeds 10% - notable improvement over previous SOTA`,
+      title: 'Notable ARC-AGI Benchmark Movement',
+      description: `Top ARC-AGI score exceeds 10%. This should be reviewed with source freshness and corroboration.`,
       url: 'https://arcprize.org/leaderboard',
       date: new Date().toISOString(),
       severity: 'high'
@@ -231,8 +250,8 @@ export function arcDataToCrawlResults(data: ARCAggregatedData): any[] {
 
   // Add summary as a special result
   results.push({
-    title: `ARC-AGI Progress Summary: ${(data.summary.topScore * 100).toFixed(1)}% (Gap: ${(data.summary.gapToHuman * 100).toFixed(1)}%)`,
-    content: `Current top score on ARC-AGI-2: ${(data.summary.topScore * 100).toFixed(1)}%. Human baseline: 100%. Gap to human-level: ${(data.summary.gapToHuman * 100).toFixed(1)}%. ${data.summary.totalTeams} teams competing. ${data.summary.significantEvents.length} significant events detected. When no remaining tasks challenge AI while remaining accessible to humans, AGI is achieved.`,
+    title: `ARC-AGI Benchmark Signal: ${(data.summary.topScore * 100).toFixed(1)}% (Gap: ${(data.summary.gapToHuman * 100).toFixed(1)}%)`,
+    content: `Current top score on ARC-AGI-2: ${(data.summary.topScore * 100).toFixed(1)}%. Human baseline: 100%. Gap to human-level on this benchmark: ${(data.summary.gapToHuman * 100).toFixed(1)}%. ${data.summary.totalTeams} teams competing. ${data.summary.significantEvents.length} significant events detected. ARC-AGI is benchmark evidence only and cannot, by itself, establish AGI or ASI.`,
     url: 'https://arcprize.org/',
     metadata: {
       source: 'ARC-AGI Aggregated',
@@ -241,7 +260,9 @@ export function arcDataToCrawlResults(data: ARCAggregatedData): any[] {
       type: 'benchmark_summary',
       topScore: data.summary.topScore,
       gap: data.summary.gapToHuman,
-      eventCount: data.summary.significantEvents.length
+      eventCount: data.summary.significantEvents.length,
+      sourceStatus: data.summary.sourceStatus,
+      benchmarkEvidence: data.summary.benchmarkEvidence
     }
   });
 
@@ -249,40 +270,37 @@ export function arcDataToCrawlResults(data: ARCAggregatedData): any[] {
 }
 
 /**
- * Get AGI progress percentage based on ARC scores
- * 0% = Current AI capabilities (baseline ~4%)
- * 100% = Human-level performance (100% ARC score)
+ * Classify ARC scores as benchmark evidence.
+ * This deliberately does not return "AGI" or "near AGI": one benchmark is
+ * a signal, not a conclusion.
  */
 export function calculateAGIProgress(topScore: number): {
   progress: number;
-  status: 'baseline' | 'improving' | 'significant' | 'breakthrough' | 'near_agi' | 'agi';
+  status: 'baseline' | 'watch' | 'notable' | 'strong' | 'exceptional';
   description: string;
 } {
-  // Normalize: 4% is baseline (0% progress), 100% is AGI (100% progress)
-  const baseline = 0.04; // Current SOTA (o3-preview-low)
+  // Normalize against the original ARC-AGI-2 launch baseline for charting only.
+  const baseline = 0.04;
   const normalized = Math.max(0, (topScore - baseline) / (1 - baseline)) * 100;
 
-  let status: 'baseline' | 'improving' | 'significant' | 'breakthrough' | 'near_agi' | 'agi';
+  let status: 'baseline' | 'watch' | 'notable' | 'strong' | 'exceptional';
   let description: string;
 
-  if (topScore >= 1.0) {
-    status = 'agi';
-    description = 'AGI achieved - AI matches human performance on novel reasoning tasks';
-  } else if (topScore >= 0.75) {
-    status = 'near_agi';
-    description = 'Near AGI - AI exceeds most humans on abstract reasoning';
+  if (topScore >= 0.75) {
+    status = 'exceptional';
+    description = 'Exceptional ARC-AGI benchmark result - requires independent review and broader evidence';
   } else if (topScore >= 0.50) {
-    status = 'breakthrough';
-    description = 'Major breakthrough - significant progress toward human-level';
+    status = 'strong';
+    description = 'Strong ARC-AGI benchmark signal - not sufficient alone for an AGI conclusion';
   } else if (topScore >= 0.25) {
-    status = 'significant';
-    description = 'Significant advancement - clear improvement over baseline';
+    status = 'notable';
+    description = 'Notable ARC-AGI benchmark movement - needs corroboration and method review';
   } else if (topScore >= 0.10) {
-    status = 'improving';
-    description = 'Notable improvement - above baseline capabilities';
+    status = 'watch';
+    description = 'ARC-AGI watch signal - above launch baseline, but not an AGI claim';
   } else {
     status = 'baseline';
-    description = 'Baseline - current AI capabilities on novel reasoning';
+    description = 'Baseline ARC-AGI benchmark signal';
   }
 
   return {
@@ -290,6 +308,55 @@ export function calculateAGIProgress(topScore: number): {
     status,
     description
   };
+}
+
+export function classifyARCBenchmarkEvidence(
+  topScore: number,
+  sourceStatus: ARCBenchmarkEvidence['sourceStatus'] = 'live'
+): ARCBenchmarkEvidence {
+  const progress = calculateAGIProgress(topScore);
+  const stale = sourceStatus === 'cached_stale' || sourceStatus === 'manual_snapshot' || sourceStatus === 'unavailable';
+  const watchPriority: ARCBenchmarkEvidence['watchPriority'] =
+    progress.status === 'exceptional' ? 'critical' :
+    progress.status === 'strong' ? 'high' :
+    progress.status === 'notable' ? 'high' :
+    progress.status === 'watch' ? 'medium' :
+    'low';
+  const evidenceConfidence: ARCBenchmarkEvidence['evidenceConfidence'] =
+    sourceStatus === 'live' ? 'strong' :
+    sourceStatus === 'cached_fresh' ? 'moderate' :
+    sourceStatus === 'unavailable' ? 'none' :
+    'weak';
+
+  return {
+    benchmark: 'ARC-AGI-2',
+    topScore,
+    status: progress.status,
+    watchPriority,
+    evidenceConfidence,
+    sourceStatus,
+    interpretation: progress.description,
+    limitations: [
+      'ARC-AGI is one benchmark signal, not an AGI or ASI meter.',
+      'Scores require method review for leakage, cost, compute, and reproducibility.',
+      ...(stale ? ['This result is not fresh live evidence.'] : [])
+    ],
+    requiredVerification: [
+      'Fresh primary-source leaderboard or official result',
+      'Method details and cost/task context',
+      'Independent corroboration outside the benchmark page'
+    ]
+  };
+}
+
+function getAggregateSourceStatus(
+  official: ARCLeaderboardResult | null,
+  kaggle: KaggleLeaderboardEntry[]
+): ARCSummary['sourceStatus'] {
+  if (official?.sourceStatus === 'live' || kaggle.length > 0) return 'live';
+  if (official?.sourceStatus === 'manual_snapshot') return 'manual_snapshot';
+  if (official?.sourceStatus === 'unavailable') return 'unavailable';
+  return 'unavailable';
 }
 
 /**

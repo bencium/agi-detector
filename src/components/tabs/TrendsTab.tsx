@@ -19,6 +19,16 @@ export const TrendsTab: React.FC<TrendsTabProps> = ({
   trendMeta,
   onPeriodChange,
 }) => {
+  const latestAnalysisDate = trendMeta?.latestAnalysisTimestamp
+    ? new Date(trendMeta.latestAnalysisTimestamp)
+    : null;
+  const hasTrendPoints = trendData.length > 0;
+  const selectedWindowLabel = trendMeta?.windowDays ? `last ${trendMeta.windowDays} days` : 'selected window';
+  const latestOutsideWindow =
+    latestAnalysisDate && trendMeta?.windowDays
+      ? Date.now() - latestAnalysisDate.getTime() > trendMeta.windowDays * 24 * 60 * 60 * 1000
+      : false;
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Period Selector */}
@@ -51,6 +61,19 @@ export const TrendsTab: React.FC<TrendsTabProps> = ({
       </div>
 
       {/* Trend Chart */}
+      {!hasTrendPoints && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl px-4 py-3 text-sm">
+          No trend points were found in the {selectedWindowLabel}.
+          {latestAnalysisDate && (
+            <> Latest stored analysis is {latestAnalysisDate.toLocaleString()}, so the current window may simply be stale.</>
+          )}
+        </div>
+      )}
+      {latestOutsideWindow && hasTrendPoints && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl px-4 py-3 text-sm">
+          Latest stored analysis is outside the selected {selectedWindowLabel}; treat this trend view as stale.
+        </div>
+      )}
       <TrendChart data={trendData} period={trendPeriod} />
 
       {/* Trend Summary */}
