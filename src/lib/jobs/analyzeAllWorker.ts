@@ -85,10 +85,15 @@ function withTimeout<T>(
 // Per-article wrapper (checks existing + timeout)
 // ---------------------------------------------------------------------------
 
+type ArticleOutcome =
+  | { status: 'analyzed'; result: PipelineResult }
+  | { status: 'skipped' }
+  | { status: 'failed' };
+
 async function analyzeArticleWithGuards(
   crawlResult: PipelineCrawlResult,
   logs: string[]
-): Promise<PipelineResult | null> {
+): Promise<ArticleOutcome> {
   try {
     const logMsg = `[Analyze] Starting analysis for: ${crawlResult.title}`;
     console.log(logMsg);
@@ -109,15 +114,15 @@ async function analyzeArticleWithGuards(
       const skipMsg = `[Analyze] Skipping already analyzed: ${crawlResult.title}`;
       console.log(skipMsg);
       logs.push(skipMsg);
-      return null;
+      return { status: 'skipped' };
     }
 
     // Run shared pipeline (secrecy detection disabled for batch)
     const result = await analyzeArticle(crawlResult, { logs });
-    return result;
+    return { status: 'analyzed', result };
   } catch (error) {
     console.error(`[Analyze] Error analyzing article ${crawlResult.id}:`, error);
-    return null;
+    return { status: 'failed' };
   }
 }
 
@@ -196,18 +201,20 @@ export async function runAnalyzeAllJob(jobId: string): Promise<void> {
           logs
         );
 
-        const validResults = settled
-          .filter(r => r.status === 'fulfilled' && (r as PromiseFulfilledResult<PipelineResult | null>).value != null)
-          .map(r => (r as PromiseFulfilledResult<PipelineResult>).value);
+        const outcomes: ArticleOutcome[] = settled.map(r =>
+          r.status === 'fulfilled' ? r.value : { status: 'failed' as const }
+        );
 
-        const batchFailed = settled.filter(r => r.status === 'rejected').length;
-        const successLog = `[Analyze All] Batch completed: ${validResults.length}/${batch.length} successful; ${batchFailed} failed/timeouts`;
+        const analyzed = outcomes.filter(o => o.status === 'analyzed').length;
+        const skipped = outcomes.filter(o => o.status === 'skipped').length;
+        const batchFailed = outcomes.filter(o => o.status === 'failed').length;
+        const successLog = `[Analyze All] Batch completed: ${analyzed}/${batch.length} successful; ${skipped} skipped; ${batchFailed} failed/timeouts`;
         logs.push(successLog);
         console.log(successLog);
 
         processedCount += batch.length;
-        successCount += validResults.length;
-        failedCount += batchFailed + (batch.length - validResults.length - batchFailed);
+        successCount += analyzed;
+        failedCount += batchFailed;
       } catch (batchError) {
         const errorLog = `[Analyze All] Batch processing error: ${(batchError as Error)?.message || 'Unknown error'}`;
         logs.push(errorLog);
