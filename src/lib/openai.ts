@@ -1,10 +1,27 @@
 import OpenAI from 'openai';
 
-// Initialize OpenAI client
-export const openai = new OpenAI({
-  apiKey: process.env.API_KEY || process.env.OPENAI_API_KEY,
-  timeout: 30000, // 30 second timeout
-  maxRetries: 2,
+// Lazily instantiated so importing this module never requires OPENAI_API_KEY:
+// `next build` page-data collection imports the API routes (and therefore this
+// module); the key is only needed on the first actual API call.
+let client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (!client) {
+    client = new OpenAI({
+      apiKey: process.env.API_KEY || process.env.OPENAI_API_KEY,
+      timeout: 30000, // 30 second timeout
+      maxRetries: 2,
+    });
+  }
+  return client;
+}
+
+export const openai: OpenAI = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    const instance = getClient();
+    const value = Reflect.get(instance, prop, instance);
+    return typeof value === 'function' ? value.bind(instance) : value;
+  },
 });
 
 // Enhanced system prompt for AGI detection - calibrated for precision over recall
