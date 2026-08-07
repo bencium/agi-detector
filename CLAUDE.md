@@ -161,11 +161,12 @@ Tables (quoted CamelCase names, Prisma-era naming kept): `CrawlResult`, `Analysi
   `security/auth` (100%), `brave-search` (93%), `evals/metrics`, `evidence/extract`,
   `methodology/signals`, `scoring/multiSignal` (76–87%).
   Thin — `security/urlValidator` (59%), `severity` (54%), `arc-sources/*` (12–27%).
-- **Zero test coverage on the core path**: `crawler.ts`, `advanced-crawler.ts`,
-  `analysis/pipeline.ts`, `db.ts`, all API routes except feedback, `jobs/*`, `insights.ts`,
-  `trends.ts`, `correlations.ts`, the zustand store, and every component except
-  `LoadingSpinner`. **Before modifying any of these, write characterization tests first**
-  (mock `db.query` and `openai`) — that is the ticket, not the feature.
+- **Mostly zero test coverage on the core path**: `crawler.ts`, `advanced-crawler.ts`,
+  `db.ts`, all API routes, `jobs/*`, `insights.ts`, `trends.ts`, the zustand store, and
+  every component except `LoadingSpinner`. `analysis/pipeline.ts` has characterization
+  tests (`__tests__/lib/pipeline.test.ts` — mocks only the `@/lib/db` and `@/lib/openai`
+  edges; use it as the template). **Before modifying any other core-path module, write
+  characterization tests first** — that is the ticket, not the feature.
 
 ## Dead code (do not extend it; do not delete it as a drive-by either)
 
