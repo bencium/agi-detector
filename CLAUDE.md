@@ -35,23 +35,21 @@ npm run test:watch
 npm test -- --coverage
 npm run lint         # next lint (warnings allowed, see eslint.config.mjs)
 npx tsc --noEmit     # typecheck (passes clean as of 2026-08)
-npm run build        # ⚠ REQUIRES OPENAI_API_KEY to be set (dummy value works):
-                     #   OPENAI_API_KEY=sk-dummy npm run build
-                     # because src/lib/openai.ts instantiates the client at module load
-                     # and Next build-time page-data collection imports the API routes.
+npm run build        # no env vars needed (the OpenAI client is lazily instantiated;
+                     # OPENAI_API_KEY is only required at runtime for analysis calls)
 ```
 
 There is no CI configured (no `.github/workflows`). Run tests + typecheck + build locally
 before pushing.
 
-Database: schema lives in `create-tables.sql` (raw SQL, run manually against Neon), but it
-is an **incomplete bootstrap**: many tables are created lazily at runtime by per-module
-`ensure*Schema()` functions (`insights.ts`, `trends.ts`, `evidence/storage.ts`,
-`evals/storage.ts`, `scoring/schema.ts`, `state/appState.ts`, `jobs/analyzeAllWorker.ts`,
-`semantic-correlations.ts`). `TrendAnalysis` is never `CREATE TABLE`d anywhere —
-`trends.ts` only `ALTER`s it — so trend snapshots silently fail on a fresh database.
-There are **no migrations**; schema evolution is ad-hoc `ALTER TABLE … IF NOT EXISTS`.
-The real schema is the union of `create-tables.sql` + all `ensure*` functions — check both.
+Database: schema lives in `create-tables.sql` (raw SQL, run manually against the Postgres
+instance — Neon or any Postgres with pgvector; `NEON_ONLY=false` allows non-Neon hosts).
+It is a complete bootstrap as of 2026-08, but several tables are *also* created lazily at
+runtime by per-module `ensure*Schema()` functions (`insights.ts`, `trends.ts`,
+`evidence/storage.ts`, `evals/storage.ts`, `scoring/schema.ts`, `state/appState.ts`,
+`jobs/analyzeAllWorker.ts`, `semantic-correlations.ts`). There are **no migrations**;
+schema evolution is ad-hoc `ALTER TABLE … IF NOT EXISTS`. When adding a table, add it to
+**both** an `ensure*Schema()` function and `create-tables.sql`, keeping the DDL identical.
 
 ## Architecture
 
@@ -153,42 +151,37 @@ Tables (quoted CamelCase names, Prisma-era naming kept): `CrawlResult`, `Analysi
 - Suite needs **no DB, no network, no env vars** — keep it that way. Anything touching
   `pg` or OpenAI must be mocked (see `__tests__/api/feedback.test.ts` for the style).
 
-### Baseline (recorded 2026-08-07, two consecutive clean runs)
+### Baseline (updated 2026-08-07)
 
-- **14 suites / 147 tests, all passing**, ~12–16s wall clock. No flaky tests observed.
+- **16 suites / 164 tests, all passing**, ~7–16s wall clock. No flaky tests observed.
 - Coverage is concentrated in pure-logic leaf modules:
   well covered — `detection/silence-patterns` (98%), `utils/safeJson` (100%),
   `security/auth` (100%), `brave-search` (93%), `evals/metrics`, `evidence/extract`,
   `methodology/signals`, `scoring/multiSignal` (76–87%).
   Thin — `security/urlValidator` (59%), `severity` (54%), `arc-sources/*` (12–27%).
-- **Mostly zero test coverage on the core path**: `crawler.ts`, `advanced-crawler.ts`,
-  `db.ts`, all API routes, `jobs/*`, `insights.ts`, `trends.ts`, the zustand store, and
-  every component except `LoadingSpinner`. `analysis/pipeline.ts` has characterization
-  tests (`__tests__/lib/pipeline.test.ts` — mocks only the `@/lib/db` and `@/lib/openai`
-  edges; use it as the template). **Before modifying any other core-path module, write
-  characterization tests first** — that is the ticket, not the feature.
+- Core-path modules with characterization tests (mock only the `@/lib/db` /
+  `@/lib/openai` / `next/server` edges — use these as templates):
+  `analysis/pipeline.ts` (`__tests__/lib/pipeline.test.ts`),
+  `jobs/analyzeAllWorker.ts` (`analyzeAllWorker.test.ts`),
+  `security/rateLimit.ts` (`rateLimit.test.ts`).
+- **Still zero test coverage**: `crawler.ts`, `advanced-crawler.ts`, `db.ts`, all API
+  routes, `insights.ts`, `trends.ts`, `semantic-correlations.ts`, the zustand store, and
+  all components. **Before modifying any of these, write characterization tests first** —
+  that is the ticket, not the feature.
 
-## Dead code (do not extend it; do not delete it as a drive-by either)
+## Dead code
 
-Verified by grepping all internal importers (2026-08). If a task touches these, flag it —
-removal should be its own deliberate PR:
+The large dead trees were removed in 2026-08 (`lib/correlations.ts`, `lib/learning/*`,
+`app/components/**`, `app/types/**`, `lib/validation/schema.ts`,
+`hooks/useConsoleCapture.ts`, the archived Firecrawl crawler + its two root docs) — see
+git history if you need them (e.g. `learning/*` was a never-wired ruvector experiment;
+the README roadmap still mentions reviving that idea).
 
-- `src/lib/correlations.ts` — superseded by `semantic-correlations.ts` (commit `02c1e66`);
-  zero importers. Its `"CorrelationFinding"` table is still in `create-tables.sql` and
-  nothing writes to it.
-- `src/lib/learning/*` (all 3 files, ~750 lines) — never wired in; `/api/feedback`
-  hand-rolls its own queries against a **different, incompatible** schema
-  (`"UserFeedback"`/camelCase vs `user_feedback`/snake_case). Header comments reference a
-  `ruvector-postgres` dependency that isn't in `package.json`.
-- `src/app/components/**` (7 files) — dead component tree; the live UI is
-  `src/components/**`. Only `LoadingSpinner` is referenced, and only by its test.
-- `src/app/types/**` — dead; live types are `src/types/index.ts`.
-- `src/lib/validation/schema.ts` — dead; routes define their zod schemas inline.
-- `src/hooks/useConsoleCapture.ts` — replaced by the store's `logs`/`addLog`.
-- `src/lib/firecrawl-crawler.ts.archived` — archived integration (with two stale root docs,
-  `SETUP_FIRECRAWL.md` / `TESTING_FIRECRAWL.md`).
-- Dead exports: `scoreLabels.getSeverityLabel`, `urlValidator.filterSafeUrls`,
-  `kaggle-integration.trackTeamProgress`.
+Still present but unused (left in place deliberately — removing exports touches live
+files): `scoreLabels.getSeverityLabel`, `urlValidator.filterSafeUrls`,
+`kaggle-integration.trackTeamProgress`, and the `"CorrelationFinding"` table
+(in `create-tables.sql`; nothing writes to it since semantic correlations replaced the
+SQL-aggregate approach in commit `02c1e66`).
 
 ## Docs: what to trust
 
@@ -205,9 +198,6 @@ removal should be its own deliberate PR:
 
 ## Ugly parts / known traps (verified 2026-08)
 
-- **Build requires `OPENAI_API_KEY`** (even a dummy) — module-load client in
-  `src/lib/openai.ts:4`. Symptom: `next build` dies in "Collecting page data" on
-  `/api/analyze`.
 - **Auth is skipped entirely in dev** when `LOCAL_API_KEY` is unset
   (`src/middleware.ts:5`) — every `/api/*` route is open. Deliberate, but don't rely on
   middleware auth in anything security-sensitive you add.
@@ -222,13 +212,11 @@ removal should be its own deliberate PR:
   `playwrightFirst`, `isAnthropicNews`) live in `SOURCES` in `crawler.ts` and are
   interpreted by *both* files.
 - **In-memory everything**: rate limiting (`security/rateLimit.ts` — a `Map` on
-  `globalThis` that also never evicts expired entries), the analyze-all job queue
-  (`jobs/analyzeAllQueue.ts`, in-process FIFO), and all `ensured` schema flags assume one
-  long-lived server process. Serverless/multi-instance deploys reset or duplicate them;
-  a crashed worker leaves its `AnalysisJob` row stuck in `running`, and no worker resumes it.
-- **"Analyze all" is really "analyze next 50"** (`ANALYZE_JOB_LIMIT`). Also its failure
-  accounting counts already-analyzed skips as failures (`analyzeAllWorker.ts:210`), so the
-  progress UI over-reports failures.
+  `globalThis`), the analyze-all job queue (`jobs/analyzeAllQueue.ts`, in-process FIFO),
+  and all `ensured` schema flags assume one long-lived server process.
+  Serverless/multi-instance deploys (e.g. Vercel) reset or duplicate them; a crashed
+  worker leaves its `AnalysisJob` row stuck in `running`, and no worker resumes it.
+- **"Analyze all" is really "analyze next 50"** (`ANALYZE_JOB_LIMIT`).
 - **Scoring subtleties** (`scoring/multiSignal.ts:110`): the combined score is
   `max(modelScore, weighted) + boosts − penalties`, so the heuristic can *raise* but never
   *lower* the model score — the MODEL/HEURISTIC weight env vars are largely decorative.
@@ -236,8 +224,7 @@ removal should be its own deliberate PR:
   demotes critical→high without a benchmark delta. Understand this before "fixing" scores.
 - **Insights window floor**: `insights.ts:182` clamps the SQL window to ≥180 days, so a
   "30-day" insight is computed from 180 days of data; only the row's `windowDays` label
-  differs. Model default in `insights.ts` is `gpt-5-mini` but `semantic-correlations.ts:130`
-  defaults to `gpt-4o-mini` — same env var, different fallbacks.
+  differs.
 - **Client actions auto-widen windows**: `fetchCorrelations`/`fetchInsights`
   (`client/actions.ts`) recursively retry with a bigger window on empty results — one call
   can issue up to three requests. The widened window is shown in the UI badge.
