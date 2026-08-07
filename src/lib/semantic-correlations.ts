@@ -127,7 +127,7 @@ Types: coordinated_announcement, thematic_cluster, contradicting_narratives, tim
 
 Return 2-5 correlations max. Quality over quantity. Empty array if nothing interesting.`;
 
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
 
   let parsed: CorrelationDraft[] = [];
   try {
