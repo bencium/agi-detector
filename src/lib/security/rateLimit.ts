@@ -18,6 +18,31 @@ const globalStore = globalThis as unknown as {
 const store = globalStore.__rateLimitStore ?? new Map<string, RateLimitEntry>();
 globalStore.__rateLimitStore = store;
 
+// Periodically drop expired entries so the map cannot grow unbounded in a
+// long-lived process (previously nothing ever evicted them).
+const SWEEP_INTERVAL_MS = 60_000;
+let lastSweepAt = 0;
+
+function sweepExpiredEntries(now: number): void {
+  if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now;
+  for (const [key, entry] of store) {
+    if (now > entry.resetAt) {
+      store.delete(key);
+    }
+  }
+}
+
+// Test hooks (same convention as brave-search's _clearBraveCache)
+export function _clearRateLimitStore(): void {
+  store.clear();
+  lastSweepAt = 0;
+}
+
+export function _rateLimitStoreSize(): number {
+  return store.size;
+}
+
 function getClientKey(req: Request, keyPrefix?: string): string {
   const headers = req.headers;
   const apiKey = headers.get('x-api-key') || 'no-key';
@@ -30,6 +55,7 @@ function getClientKey(req: Request, keyPrefix?: string): string {
 export function enforceRateLimit(req: Request, options: RateLimitOptions): NextResponse | null {
   const key = getClientKey(req, options.keyPrefix);
   const now = Date.now();
+  sweepExpiredEntries(now);
   const entry = store.get(key);
 
   if (!entry || now > entry.resetAt) {
