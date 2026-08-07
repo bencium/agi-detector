@@ -44,11 +44,14 @@ npm run build        # ⚠ REQUIRES OPENAI_API_KEY to be set (dummy value works)
 There is no CI configured (no `.github/workflows`). Run tests + typecheck + build locally
 before pushing.
 
-Database: schema lives in `create-tables.sql` (raw SQL, run manually against Neon).
-Several tables are also created lazily at runtime via `CREATE TABLE IF NOT EXISTS`
-(e.g. `ensureAnalysisJobSchema` in `src/lib/jobs/analyzeAllWorker.ts`,
-`ensureAnalysisScoreSchema` in `src/lib/scoring/schema.ts`). There are **no migrations** —
-schema evolution is ad-hoc `ALTER TABLE IF NOT EXISTS`-style statements.
+Database: schema lives in `create-tables.sql` (raw SQL, run manually against Neon), but it
+is an **incomplete bootstrap**: many tables are created lazily at runtime by per-module
+`ensure*Schema()` functions (`insights.ts`, `trends.ts`, `evidence/storage.ts`,
+`evals/storage.ts`, `scoring/schema.ts`, `state/appState.ts`, `jobs/analyzeAllWorker.ts`,
+`semantic-correlations.ts`). `TrendAnalysis` is never `CREATE TABLE`d anywhere —
+`trends.ts` only `ALTER`s it — so trend snapshots silently fail on a fresh database.
+There are **no migrations**; schema evolution is ad-hoc `ALTER TABLE … IF NOT EXISTS`.
+The real schema is the union of `create-tables.sql` + all `ensure*` functions — check both.
 
 ## Architecture
 
@@ -91,10 +94,10 @@ severity,signals,evidence}.test.ts` are the spec — update them deliberately, n
 | Domain logic | `src/lib/**` | Pure-ish modules; most testable code lives here |
 | DB access | `src/lib/db.ts` only | Raw parameterized SQL via `pg` Pool. **No ORM.** No repository layer — routes/lib write SQL inline against helpers `query/queryOne/insert/execute/withTransaction` |
 | Auth/limits | `src/middleware.ts` + `src/lib/security/*` | `x-api-key` == `LOCAL_API_KEY` for all `/api/*`; per-route in-memory rate limits; SSRF guard `urlValidator.ts` for all crawled URLs |
-| Client state | `src/store/appStore.ts` (zustand) | Single store for the whole dashboard |
-| Client API calls | `src/lib/client/{api,actions}.ts` | All fetches go through `apiFetch` (adds api key); page components call action functions, not fetch directly |
+| Client state | `src/store/appStore.ts` (zustand, `persist` to localStorage) | Single store; `page.tsx` is the **sole** `useAppStore()` consumer and passes slices down as props |
+| Client API calls | `src/lib/client/{api,actions}.ts` | All fetches go through `apiFetch` (adds `x-api-key`); async UI logic lives in `actions.ts` functions taking the store as first arg — components never call `fetch` directly (known exceptions: `AnomalyDetection.tsx`, `SemanticSearch.tsx` self-fetch with local state) |
 | Server "app state" | `src/lib/state/appState.ts` | Key/value in "AppState" table (e.g. last crawl time) — distinct from the zustand store despite the similar name |
-| UI | `src/app/page.tsx` + `src/components/tabs/*` | Single-page, 5 tabs; presentational components receive store slices as props |
+| UI | `src/app/page.tsx` + `src/components/tabs/*` | Single-page, 5 tabs; tab components are pure presentational (props in, callbacks out) |
 
 ### Database (Neon Postgres + pgvector)
 
@@ -117,6 +120,15 @@ Tables (quoted CamelCase names, Prisma-era naming kept): `CrawlResult`, `Analysi
   throws. API routes catch everything and return
   `NextResponse.json({ success: false, error, details? }, { status })`.
 - **API response shape:** `{ success: boolean, data?, meta?, error?, details?, message? }`.
+- **Lazy schema pattern:** modules that own a table export an `ensure<X>Schema()` that runs
+  `CREATE TABLE IF NOT EXISTS` behind a module-level `let ensured = false` guard, wrapped
+  in try/catch that only warns. New tables follow this pattern *and* get added to
+  `create-tables.sql`.
+- **Table naming:** quoted PascalCase tables and camelCase columns (`"AnalysisResult"`,
+  `"crawlId"`) — a Prisma-era convention that all live code follows. (The dead `learning/*`
+  modules use snake_case; do not copy them.)
+- **Components:** most export both a named and a default export; tab components stay
+  presentational — data fetching belongs in `client/actions.ts`, state in the zustand store.
 - **Config via env vars** parsed inline with defaults, e.g.
   `parseInt(process.env.ANALYZE_BATCH_SIZE || '2', 10)`. New tunables follow this pattern
   and get documented in `.env.local.example` + README.
@@ -155,32 +167,82 @@ Tables (quoted CamelCase names, Prisma-era naming kept): `CrawlResult`, `Analysi
   `LoadingSpinner`. **Before modifying any of these, write characterization tests first**
   (mock `db.query` and `openai`) — that is the ticket, not the feature.
 
+## Dead code (do not extend it; do not delete it as a drive-by either)
+
+Verified by grepping all internal importers (2026-08). If a task touches these, flag it —
+removal should be its own deliberate PR:
+
+- `src/lib/correlations.ts` — superseded by `semantic-correlations.ts` (commit `02c1e66`);
+  zero importers. Its `"CorrelationFinding"` table is still in `create-tables.sql` and
+  nothing writes to it.
+- `src/lib/learning/*` (all 3 files, ~750 lines) — never wired in; `/api/feedback`
+  hand-rolls its own queries against a **different, incompatible** schema
+  (`"UserFeedback"`/camelCase vs `user_feedback`/snake_case). Header comments reference a
+  `ruvector-postgres` dependency that isn't in `package.json`.
+- `src/app/components/**` (7 files) — dead component tree; the live UI is
+  `src/components/**`. Only `LoadingSpinner` is referenced, and only by its test.
+- `src/app/types/**` — dead; live types are `src/types/index.ts`.
+- `src/lib/validation/schema.ts` — dead; routes define their zod schemas inline.
+- `src/hooks/useConsoleCapture.ts` — replaced by the store's `logs`/`addLog`.
+- `src/lib/firecrawl-crawler.ts.archived` — archived integration (with two stale root docs,
+  `SETUP_FIRECRAWL.md` / `TESTING_FIRECRAWL.md`).
+- Dead exports: `scoreLabels.getSeverityLabel`, `urlValidator.filterSafeUrls`,
+  `kaggle-integration.trackTeamProgress`.
+
+## Docs: what to trust
+
+- **Current & authoritative:** `docs/methodology.md` (mirrors `lib/methodology/signals.ts` —
+  the watch-priority vs evidence-confidence split), this file.
+- **Partially stale:** `README.md` (badge says Next 14, one section says GPT-4o-mini;
+  reality: Next 15, `gpt-5-mini` default; feature list is otherwise roughly right).
+  `.env.local.example` retains Prisma-era comments (`DIRECT_URL`, "Prisma reads
+  DATABASE_URL") — the vars themselves are still correct.
+- **Stale — historical artifacts only:** `AGENTS.md` (Prisma/Firecrawl era),
+  `docs/Specification|Pseudocode|Architecture|Refinement|Completion.md` (original SPARC
+  planning docs describing a MongoDB/pages-router app that was never built this way),
+  `docs/ruv.md` (raw research dump).
+
 ## Ugly parts / known traps (verified 2026-08)
 
-- **`AGENTS.md` is stale — this file supersedes it.** It references Prisma
-  (`prisma/`, `src/lib/prisma.ts`, migrate commands) and `firecrawl-crawler.ts`; the code
-  actually uses raw `pg` and the Firecrawl crawler is archived
-  (`src/lib/firecrawl-crawler.ts.archived`). `.env.local.example` and README also retain
-  Prisma-era comments (`DIRECT_URL`, "Prisma reads DATABASE_URL"). README badge says
-  Next.js 14 / one section says GPT-4o-mini; reality is Next 15 / `gpt-5-mini` default.
 - **Build requires `OPENAI_API_KEY`** (even a dummy) — module-load client in
   `src/lib/openai.ts:4`. Symptom: `next build` dies in "Collecting page data" on
   `/api/analyze`.
-- **Two things named "app state"**: `src/store/appStore.ts` (client zustand) vs
-  `src/lib/state/appState.ts` (server, DB-backed KV). Don't confuse them.
+- **Auth is skipped entirely in dev** when `LOCAL_API_KEY` is unset
+  (`src/middleware.ts:5`) — every `/api/*` route is open. Deliberate, but don't rely on
+  middleware auth in anything security-sensitive you add.
+- **Two things named "app state"**: `src/store/appStore.ts` (client zustand; its interface
+  is even named `AppState`) vs `src/lib/state/appState.ts` (server, DB-backed KV). Same
+  trap with `SourceStatus`: a UI card model in `components/MonitoringStatus.tsx` vs a
+  freshness enum in `methodology/signals.ts`. `Severity` is declared in three places
+  (`severity.ts`, `utils/safeJson.ts`, `types/index.ts`).
 - **Two crawlers**: `crawler.ts` (cheerio/axios + per-source selectors) and
   `advanced-crawler.ts` (RSS/Brave/fetch/Playwright strategy chain). `crawlAllSources`
   tries advanced first and falls back to simple; source configs (selectors, flags like
   `playwrightFirst`, `isAnthropicNews`) live in `SOURCES` in `crawler.ts` and are
   interpreted by *both* files.
-- **In-memory rate limiting and job state** (`security/rateLimit.ts`, module-level flags)
-  assume a single long-lived server process — serverless/multi-instance deploys reset them.
-- **Fire-and-forget batch jobs**: `/api/analyze-all` starts `runAnalyzeAllJob` without
-  awaiting; progress is polled from the `AnalysisJob` table via `/api/analyze-status`.
-  A crashed worker leaves the job row stuck in `running`.
-- **Lazy schema creation** scattered in lib code (`ensure*Schema`) means the DB schema is
-  the union of `create-tables.sql` + whatever `ensure*` functions have run — check both
-  before assuming a column exists.
+- **In-memory everything**: rate limiting (`security/rateLimit.ts` — a `Map` on
+  `globalThis` that also never evicts expired entries), the analyze-all job queue
+  (`jobs/analyzeAllQueue.ts`, in-process FIFO), and all `ensured` schema flags assume one
+  long-lived server process. Serverless/multi-instance deploys reset or duplicate them;
+  a crashed worker leaves its `AnalysisJob` row stuck in `running`, and no worker resumes it.
+- **"Analyze all" is really "analyze next 50"** (`ANALYZE_JOB_LIMIT`). Also its failure
+  accounting counts already-analyzed skips as failures (`analyzeAllWorker.ts:210`), so the
+  progress UI over-reports failures.
+- **Scoring subtleties** (`scoring/multiSignal.ts:110`): the combined score is
+  `max(modelScore, weighted) + boosts − penalties`, so the heuristic can *raise* but never
+  *lower* the model score — the MODEL/HEURISTIC weight env vars are largely decorative.
+  Severity is monotonic (`computeSeverity` never decreases) and `enforceCriticalEvidenceGate`
+  demotes critical→high without a benchmark delta. Understand this before "fixing" scores.
+- **Insights window floor**: `insights.ts:182` clamps the SQL window to ≥180 days, so a
+  "30-day" insight is computed from 180 days of data; only the row's `windowDays` label
+  differs. Model default in `insights.ts` is `gpt-5-mini` but `semantic-correlations.ts:130`
+  defaults to `gpt-4o-mini` — same env var, different fallbacks.
+- **Client actions auto-widen windows**: `fetchCorrelations`/`fetchInsights`
+  (`client/actions.ts`) recursively retry with a bigger window on empty results — one call
+  can issue up to three requests. The widened window is shown in the UI badge.
+- **SSRF validator escape hatch**: `urlValidator.ts:106-144` allowlists ~10 Chinese
+  research hostnames to pass when DNS resolution *fails* (GFW flakiness) — a deliberate
+  bypass of IP validation for those hosts. Don't widen that list casually.
 - **Maintenance/debug routes are production-reachable** (behind the api key):
   `backfill-*`, `fix-arxiv-urls`, `rebuild-trends`, `test-crawl`, `test-crawler`,
   `test-openai`, `db-info`. Be careful what you add there.
