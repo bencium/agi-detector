@@ -53,6 +53,38 @@ export async function ensureAnalysisJobSchema(): Promise<void> {
 const ANALYZE_BATCH_SIZE = Math.max(1, parseInt(process.env.ANALYZE_BATCH_SIZE || '2', 10));
 const ANALYZE_JOB_LIMIT = Math.max(1, parseInt(process.env.ANALYZE_JOB_LIMIT || '50', 10));
 const BATCH_TIMEOUT_MS = parseInt(process.env.BATCH_TIMEOUT_MS || '20000', 10);
+const STALE_JOB_MINUTES = Math.max(1, parseInt(process.env.STALE_JOB_MINUTES || '30', 10));
+
+// ---------------------------------------------------------------------------
+// Stale job recovery
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark queued/running jobs older than maxAgeMinutes as failed. A crashed or
+ * recycled worker process (e.g. a serverless instance) otherwise leaves its
+ * job stuck in 'running' forever, and no worker ever resumes it.
+ * Returns the number of jobs marked failed.
+ */
+export async function failStaleJobs(maxAgeMinutes = STALE_JOB_MINUTES): Promise<number> {
+  try {
+    const failed = await execute(
+      `UPDATE "AnalysisJob" SET
+         status = 'failed',
+         error = 'Stale job: worker did not complete (process likely crashed or was recycled)',
+         "completedAt" = NOW()
+       WHERE status IN ('queued', 'running')
+         AND "startedAt" < NOW() - make_interval(mins => $1)`,
+      [maxAgeMinutes]
+    );
+    if (failed > 0) {
+      console.warn(`[Analyze All] Auto-failed ${failed} stale job(s) older than ${maxAgeMinutes}m`);
+    }
+    return failed;
+  } catch (error) {
+    console.warn('[Analyze All] Failed to clear stale jobs:', error);
+    return 0;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Timeout utility (worker-specific infrastructure)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, isDbEnabled } from '@/lib/db';
-import { ensureAnalysisJobSchema } from '@/lib/jobs/analyzeAllWorker';
+import { ensureAnalysisJobSchema, failStaleJobs } from '@/lib/jobs/analyzeAllWorker';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
 
   try {
     await ensureAnalysisJobSchema();
+    await failStaleJobs();
     let job: AnalysisJob | null;
 
     if (jobId) {

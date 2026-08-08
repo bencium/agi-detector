@@ -185,16 +185,14 @@ SQL-aggregate approach in commit `02c1e66`).
 
 ## Docs: what to trust
 
-- **Current & authoritative:** `docs/methodology.md` (mirrors `lib/methodology/signals.ts` —
-  the watch-priority vs evidence-confidence split), this file.
-- **Partially stale:** `README.md` (badge says Next 14, one section says GPT-4o-mini;
-  reality: Next 15, `gpt-5-mini` default; feature list is otherwise roughly right).
-  `.env.local.example` retains Prisma-era comments (`DIRECT_URL`, "Prisma reads
-  DATABASE_URL") — the vars themselves are still correct.
-- **Stale — historical artifacts only:** `AGENTS.md` (Prisma/Firecrawl era),
+- **Current & authoritative:** this file, `docs/methodology.md` (mirrors
+  `lib/methodology/signals.ts` — the watch-priority vs evidence-confidence split),
+  `AGENTS.md` (a short pointer here), `README.md` and `.env.local.example`
+  (both refreshed 2026-08).
+- **Stale — historical artifacts only:**
   `docs/Specification|Pseudocode|Architecture|Refinement|Completion.md` (original SPARC
   planning docs describing a MongoDB/pages-router app that was never built this way),
-  `docs/ruv.md` (raw research dump).
+  `docs/ruv.md` (raw research dump), `web-scraping-guide.md` (generic notes).
 
 ## Ugly parts / known traps (verified 2026-08)
 
@@ -215,7 +213,9 @@ SQL-aggregate approach in commit `02c1e66`).
   `globalThis`), the analyze-all job queue (`jobs/analyzeAllQueue.ts`, in-process FIFO),
   and all `ensured` schema flags assume one long-lived server process.
   Serverless/multi-instance deploys (e.g. Vercel) reset or duplicate them; a crashed
-  worker leaves its `AnalysisJob` row stuck in `running`, and no worker resumes it.
+  worker's `AnalysisJob` row is not resumed — `failStaleJobs()` (called from the
+  analyze-all and analyze-status routes) auto-fails rows stuck in `queued`/`running`
+  for more than `STALE_JOB_MINUTES` (default 30).
 - **"Analyze all" is really "analyze next 50"** (`ANALYZE_JOB_LIMIT`).
 - **Scoring subtleties** (`scoring/multiSignal.ts:110`): the combined score is
   `max(modelScore, weighted) + boosts − penalties`, so the heuristic can *raise* but never

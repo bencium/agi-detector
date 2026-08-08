@@ -20,7 +20,7 @@ jest.mock('@/lib/analysis/pipeline', () => ({
   updateTrendSnapshots: jest.fn(async () => undefined),
 }));
 
-import { runAnalyzeAllJob } from '@/lib/jobs/analyzeAllWorker';
+import { runAnalyzeAllJob, failStaleJobs } from '@/lib/jobs/analyzeAllWorker';
 import { query, execute } from '@/lib/db';
 import { analyzeArticle } from '@/lib/analysis/pipeline';
 
@@ -104,5 +104,25 @@ describe('runAnalyzeAllJob', () => {
     const failedUpdate = executeMock.mock.calls.find(([sql]) => sql.includes(`status = 'failed'`));
     expect(failedUpdate).toBeDefined();
     expect(failedUpdate?.[1][0]).toBe('db down');
+  });
+});
+
+describe('failStaleJobs', () => {
+  it('fails queued/running jobs older than the cutoff and returns the count', async () => {
+    executeMock.mockResolvedValue(2);
+
+    const failed = await failStaleJobs(15);
+
+    expect(failed).toBe(2);
+    const [sql, params] = executeMock.mock.calls[0];
+    expect(sql).toContain(`status IN ('queued', 'running')`);
+    expect(sql).toContain(`status = 'failed'`);
+    expect(params).toEqual([15]);
+  });
+
+  it('degrades gracefully (returns 0) when the update throws', async () => {
+    executeMock.mockRejectedValue(new Error('db down'));
+
+    await expect(failStaleJobs()).resolves.toBe(0);
   });
 });
