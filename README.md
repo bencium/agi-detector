@@ -1,7 +1,7 @@
 # AGI Detector 🧠
 
 [![Build Status](https://img.shields.io/badge/build-in%20progress-yellow)](https://github.com/bencium/agi-detector)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 An advanced monitoring system designed to detect possible signals related to Artificial General Intelligence (AGI) by analyzing patterns across AI research labs, academic papers, benchmarks, and technology news. It is a signal and evidence assessment system, not an oracle.
@@ -73,7 +73,7 @@ A sophisticated early-warning system that monitors the AI landscape for plausibl
 
 ### Beautiful UI
 - **Anthropic-Inspired Design**: Clean, minimal interface with sophisticated aesthetics
-- **Four-Tab Navigation**: Overview, Findings, Analysis, and Trends
+- **Five-Tab Navigation**: Overview, Findings, Analysis, Trends, and Anomalies
 - **Enhanced Risk Level Indicator**: Shows current risk level with details (average score, critical findings count)
 - **Real-time Console Output**: Floating console window shows detailed analysis progress
 - **Processing Animations**: Glowing button effect and automatic console expansion during analysis
@@ -84,11 +84,11 @@ A sophisticated early-warning system that monitors the AI landscape for plausibl
 ## 🏗️ Architecture
 
 ### Tech Stack
-- **Frontend**: Next.js 14 + React 19 + TypeScript
+- **Frontend**: Next.js 15 + React 19 + TypeScript
 - **Styling**: TailwindCSS with custom Anthropic-inspired theme
 - **Database**: PostgreSQL + pgvector (raw SQL via `pg` library)
 - **Vector Search**: pgvector extension for semantic similarity (512-dim embeddings)
-- **AI Integration**: OpenAI GPT-4o-mini
+- **AI Integration**: OpenAI gpt-5-mini (default; override with `OPENAI_MODEL`)
 - **Web Crawling**:
   - Advanced multi-strategy crawler with RSS feed support
   - Playwright browser automation for JavaScript-heavy sites
@@ -472,7 +472,7 @@ How it’s mitigated in code
 
 Environment tuning (recommended for dev)
 - Add these to `.env.local` to speed up responses and reduce timeouts:
-  - `OPENAI_MODEL=gpt-4o-mini` (fast, reliable)
+  - `OPENAI_MODEL=gpt-5-mini` (default)
   - `OPENAI_TIMEOUT_MS=12000` (per‑request timeout)
   - `ANALYZE_BATCH_SIZE=2` (lower concurrency)
   - `BATCH_TIMEOUT_MS=18000` (per‑batch cap)
